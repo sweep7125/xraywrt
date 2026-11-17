@@ -1,0 +1,269 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    outputs:
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check tag against PKG_VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        id: version
+        run: |
+          set -eu
+          version="$(sed -n 's/^PKG_VERSION:=//p' Makefile)"
+          # v<PKG_VERSION> is a release; v<PKG_VERSION>-rc<N> a pre-release.
+          prerelease=""
+          if [ -n "$version" ]; then
+            case "$GITHUB_REF_NAME" in
+              "v$version") prerelease=0 ;;
+              "v$version"-rc*)
+                case "${GITHUB_REF_NAME#"v$version"-rc}" in
+                  '' | *[!0-9]*) ;;
+                  *) prerelease=1 ;;
+                esac
+                ;;
+            esac
+          fi
+          if [ -z "$prerelease" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Makefile PKG_VERSION v$version (or v$version-rc<N>)" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "PRERELEASE=$prerelease" >> "$GITHUB_ENV"
+          echo "prerelease=$prerelease" >> "${GITHUB_OUTPUT:-/dev/null}"
+
+      - name: Verify release commit is on main
+        if: startsWith(github.ref, 'refs/tags/') && steps.version.outputs.prerelease == '0'
+        run: |
+          set -eu
+          case "$GITHUB_REF_NAME" in
+            *-rc*) exit 0 ;;
+          esac
+          git fetch --depth=100 origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "Tag $GITHUB_REF_NAME commit $(git rev-parse HEAD) is not an ancestor of origin/main" >&2
+            exit 1
+          fi
+
+      - name: Cache SDK archive
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .sdk
+          key: sdk-25.12
+
+      - name: Build test image
+        run: docker build -t xraywrt-test:local -f Dockerfile.test .
+
+      - name: Run tests
+        run: docker run --rm -v "$PWD:/workspace:ro" -w /workspace xraywrt-test:local bash tests/run.sh
+
+      - name: Build packages
+        run: ./tools/build-sdk.sh build
+
+      - name: Inspect built APKs
+        run: |
+          docker run --rm -i -v "$PWD:/workspace:ro" -w /workspace xraywrt-test:local bash -euo pipefail << 'EOF'
+          set -euo pipefail
+          apk_list=(dist/*.apk)
+          [ "${#apk_list[@]}" -gt 0 ] || { echo "No APKs found in dist/" >&2; exit 1; }
+
+          for apk in "${apk_list[@]}"; do
+            [ -f "$apk" ] || continue
+            echo "=========================================="
+            echo "Inspecting APK: $(basename "$apk")"
+            echo "=========================================="
+            dump="$(apk adbdump "$apk")"
+
+            # 1. Architecture check (must be noarch)
+            arch="$(printf "%s\n" "$dump" | awk '/^  arch:/ { print $2 }')"
+            echo "Architecture: $arch"
+            if [ "$arch" != "noarch" ]; then
+              echo "ERROR: $(basename "$apk") arch is not noarch: $arch" >&2
+              exit 1
+            fi
+
+            # 2. Dependencies check (must be non-empty)
+            echo "Dependencies:"
+            deps="$(printf "%s\n" "$dump" | awk '
+              /^  depends:/ { f=1; next }
+              f && /^    - / { sub(/^    - /, ""); print; next }
+              f { f=0 }
+            ')"
+            if [ -z "$deps" ]; then
+              echo "ERROR: $(basename "$apk") has no dependencies" >&2
+              exit 1
+            fi
+            printf "%s\n" "$deps"
+
+            # 3. Scripts check (must be present)
+            echo "Scripts:"
+            scripts="$(printf "%s\n" "$dump" | awk '
+              /^scripts:/ { f=1; next }
+              f && /^  [a-z-]+:/ { sub(/:.*/, ""); sub(/^ +/, ""); print; next }
+              f && /^[^ ]/ { f=0 }
+            ')"
+            if [ -z "$scripts" ]; then
+              echo "ERROR: $(basename "$apk") has no scripts" >&2
+              exit 1
+            fi
+            printf "%s\n" "$scripts"
+
+            # 4. File list and modes
+            echo "Files and modes:"
+            file_modes="$(printf "%s\n" "$dump" | awk '
+              /^paths:/ { in_paths=1; next }
+              in_paths && /^  - name: / { cur_dir=$3; in_files=0; next }
+              in_paths && /^    files:/ { in_files=1; next }
+              in_paths && in_files && /^      - name: / { cur_file=$3; next }
+              in_paths && in_files && /^          mode: / {
+                mode=$2
+                if (cur_dir != "") {
+                  print cur_dir "/" cur_file, mode
+                } else {
+                  print cur_file, mode
+                }
+                next
+              }
+              in_paths && /^[^ ]/ { in_paths=0 }
+            ')"
+            if [ -z "$file_modes" ]; then
+              echo "ERROR: $(basename "$apk") has no files" >&2
+              exit 1
+            fi
+            printf "%s\n" "$file_modes"
+
+            # 5. Check modes of etc/init.d/xraywrt and usr/bin/* (must be executable)
+            found_init=0
+            found_usr_bin=0
+            while read -r file mode; do
+              [ -n "$file" ] || continue
+              case "$file" in
+                etc/init.d/xraywrt)
+                  found_init=1
+                  case "$mode" in
+                    07[57][57]|0555) echo "OK: $file executable mode $mode" ;;
+                    *) echo "ERROR: $file has non-executable mode $mode" >&2; exit 1 ;;
+                  esac
+                  ;;
+                usr/bin/*)
+                  found_usr_bin=1
+                  case "$mode" in
+                    07[57][57]|0555) echo "OK: $file executable mode $mode" ;;
+                    *) echo "ERROR: $file has non-executable mode $mode" >&2; exit 1 ;;
+                  esac
+                  ;;
+              esac
+            done <<< "$file_modes"
+
+            case "$(basename "$apk")" in
+              luci-app-xraywrt*)
+                if [ "$found_init" -ne 1 ]; then
+                  echo "ERROR: $(basename "$apk") missing etc/init.d/xraywrt" >&2
+                  exit 1
+                fi
+                if [ "$found_usr_bin" -ne 1 ]; then
+                  echo "ERROR: $(basename "$apk") missing usr/bin/*" >&2
+                  exit 1
+                fi
+                ;;
+            esac
+          done
+          echo "All APK checks passed."
+          EOF
+
+      - name: Upload built packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: packages-25.12
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 45
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download release packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+
+      - name: Stage release assets and checksums
+        run: |
+          set -eu
+          mkdir -p release
+          for name in luci-app-xraywrt luci-i18n-xraywrt-ru; do
+            set -- dist/"$name"-[0-9]*.apk
+            if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+              echo "Expected exactly one dist/$name-<ver>.apk, found: $*" >&2
+              exit 1
+            fi
+            cp "$1" "release/$(basename "$1")"
+            cp "$1" "release/$name.apk"
+          done
+          cd release
+          sha256sum \
+            luci-app-xraywrt-[0-9]*.apk \
+            luci-i18n-xraywrt-ru-[0-9]*.apk \
+            luci-app-xraywrt.apk \
+            luci-i18n-xraywrt-ru.apk > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Extract release notes
+        run: |
+          set -eu
+          version="$(sed -n 's/^PKG_VERSION:=//p' Makefile)"
+          awk -v v="$version" '
+            $0 == "## " v { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "CHANGELOG.md has no non-empty '## $version' section" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          set -eu
+          set -- release/*.apk release/SHA256SUMS
+          if [ "$PRERELEASE" = 1 ]; then
+            set -- --prerelease "$@"
+          fi
+          # Draft: publish by hand after the core packages and SHA256SUMS-core are
+          # uploaded, or "latest" would point at a release without a core.
+          gh release create "$GITHUB_REF_NAME" --draft \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            "$@"

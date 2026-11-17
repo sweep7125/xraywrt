@@ -1,0 +1,23 @@
+{
+  "remarks": "Fake",
+  "xraywrt": {"mode": "direct-first"},
+  "dns": {
+    "servers": [
+      {"address": "fakedns", "domains": ["geosite:netflix", "domain:example.org"]},
+      {"address": "https://dns.example.net/dns-query", "domains": ["geosite:google"], "skipFallback": true},
+      "https://dns.example.com/dns-query"
+    ]
+  },
+  "geodata": {"assets": [{"file": "geosite.dat", "url": "https://geo.example.com/geosite.dat"}, {"file": "geoip.dat", "url": "https://geo.example.com/geoip.dat"}]},
+  "outbounds": [
+    {"tag": "proxy", "protocol": "vless", "settings": {"vnext": [{"address": "node.example.com", "port": 443, "users": [{"id": "11111111-2222-3333-4444-555555555555", "encryption": "none", "flow": "xtls-rprx-vision"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {"serverName": "www.example.com", "publicKey": "Zp5kpWj6hFWPhRDn0CNsc4nHLR8TxH0YdgW_QjDyUWs", "shortId": "6ba85179e30d4fc2", "fingerprint": "chrome"}}},
+    {"tag": "direct", "protocol": "freedom"},
+    {"tag": "block", "protocol": "blackhole"}
+  ],
+  "routing": {"domainStrategy": "IPIfNonMatch", "rules": [
+    {"domain": ["geosite:netflix"], "outboundTag": "proxy"},
+    {"ip": ["geoip:private", "geoip:ru"], "outboundTag": "direct"},
+    {"network": "tcp,udp", "outboundTag": "direct"}
+  ]}
+}

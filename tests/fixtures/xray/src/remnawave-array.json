@@ -1,0 +1,395 @@
+[
+  {
+    "remarks": "NL Amsterdam",
+    "log": {
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "https://dns.example.net/dns-query"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy-1",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "nl1.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "www.example.com",
+            "fingerprint": "chrome",
+            "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8",
+            "shortId": "6ba85179e30d4fc2"
+          }
+        }
+      },
+      {
+        "tag": "proxy-2",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "nl2.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "www.example.com",
+            "fingerprint": "chrome",
+            "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8",
+            "shortId": "6ba85179e30d4fc2"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole"
+      }
+    ],
+    "observatory": {
+      "subjectSelector": [
+        "proxy-"
+      ],
+      "probeURL": "https://www.gstatic.com/generate_204",
+      "probeInterval": "5m"
+    },
+    "routing": {
+      "domainStrategy": "IPIfNonMatch",
+      "balancers": [
+        {
+          "tag": "auto",
+          "selector": [
+            "proxy-"
+          ],
+          "strategy": {
+            "type": "leastPing"
+          },
+          "fallbackTag": "proxy-1"
+        }
+      ],
+      "rules": [
+        {
+          "domain": [
+            "geosite:private"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "ip": [
+            "geoip:private"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "network": "tcp,udp",
+          "balancerTag": "auto"
+        }
+      ]
+    }
+  },
+  {
+    "remarks": "DE Frankfurt",
+    "log": {
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "https://dns.example.net/dns-query"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy-1",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "de1.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "www.example.com",
+            "fingerprint": "chrome",
+            "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8",
+            "shortId": "6ba85179e30d4fc2"
+          }
+        }
+      },
+      {
+        "tag": "proxy-2",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "203.0.113.10",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "www.example.com",
+            "fingerprint": "chrome",
+            "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8",
+            "shortId": "6ba85179e30d4fc2"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole"
+      }
+    ],
+    "observatory": {
+      "subjectSelector": [
+        "proxy-"
+      ],
+      "probeURL": "https://www.gstatic.com/generate_204",
+      "probeInterval": "5m"
+    },
+    "routing": {
+      "domainStrategy": "IPIfNonMatch",
+      "balancers": [
+        {
+          "tag": "auto",
+          "selector": [
+            "proxy-"
+          ],
+          "strategy": {
+            "type": "leastPing"
+          },
+          "fallbackTag": "proxy-1"
+        }
+      ],
+      "rules": [
+        {
+          "domain": [
+            "geosite:private"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "ip": [
+            "geoip:private"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "network": "tcp,udp",
+          "balancerTag": "auto"
+        }
+      ]
+    }
+  },
+  {
+    "remarks": "FI Helsinki",
+    "log": {
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "https://dns.example.net/dns-query"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy-1",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "fi1.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "www.example.com",
+            "fingerprint": "chrome",
+            "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8",
+            "shortId": "6ba85179e30d4fc2"
+          }
+        }
+      },
+      {
+        "tag": "proxy-2",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "fi2.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "www.example.com",
+            "fingerprint": "chrome",
+            "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8",
+            "shortId": "6ba85179e30d4fc2"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole"
+      }
+    ],
+    "observatory": {
+      "subjectSelector": [
+        "proxy-"
+      ],
+      "probeURL": "https://www.gstatic.com/generate_204",
+      "probeInterval": "5m"
+    },
+    "routing": {
+      "domainStrategy": "IPIfNonMatch",
+      "balancers": [
+        {
+          "tag": "auto",
+          "selector": [
+            "proxy-"
+          ],
+          "strategy": {
+            "type": "leastPing"
+          },
+          "fallbackTag": "proxy-1"
+        }
+      ],
+      "rules": [
+        {
+          "domain": [
+            "geosite:private"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "ip": [
+            "geoip:private"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "network": "tcp,udp",
+          "balancerTag": "auto"
+        }
+      ]
+    }
+  }
+]

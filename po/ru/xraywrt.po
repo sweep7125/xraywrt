@@ -1,0 +1,1610 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ru\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Unknown error"
+msgstr "Неизвестная ошибка"
+
+msgid "Unexpected response from the router: %s"
+msgstr "Неожиданный ответ роутера: %s"
+
+msgid "Unlimited"
+msgstr "Безлимит"
+
+msgid "Configuration is valid"
+msgstr "Конфигурация корректна"
+
+msgid "Subscription configured"
+msgstr "Подписка настроена"
+
+msgid "No subscription: your own configuration is used"
+msgstr "Подписки нет: используется ваша конфигурация"
+
+msgid "Service is running"
+msgstr "Служба XrayWRT работает"
+
+msgid "Press Start on Home. If it stops again, check the log below."
+msgstr "Нажмите «Запустить» на странице «Главная». Если служба снова остановится, посмотрите журнал ниже."
+
+msgid "Traffic rules are active"
+msgstr "Правила трафика активны"
+
+msgid "Restart the service; if it persists, see the log."
+msgstr "Перезапустите службу; если не поможет, посмотрите журнал."
+
+msgid "dnsmasq has its own upstream servers: %s"
+msgstr "У dnsmasq заданы собственные DNS-серверы: %s"
+
+msgid "OK:"
+msgstr "Норма:"
+
+msgid "Problem:"
+msgstr "Проблема:"
+
+msgid "XrayWRT version"
+msgstr "Версия XrayWRT"
+
+msgid "Version %s · core %s"
+msgstr "Версия %s · ядро %s"
+
+msgid "Version %s"
+msgstr "Версия %s"
+
+msgid "Traffic mode"
+msgstr "Режим"
+
+msgid "Client interfaces"
+msgstr "Интерфейсы клиентов"
+
+msgid "List entries"
+msgstr "Записи в списках"
+
+msgid "Routing table"
+msgstr "Таблица маршрутизации"
+
+msgid "not active"
+msgstr "не активна"
+
+msgid "Starts at boot"
+msgstr "Запускается при включении роутера"
+
+msgid "yes"
+msgstr "да"
+
+msgid "no"
+msgstr "нет"
+
+msgid "in effect"
+msgstr "действует"
+
+msgid "no effect in this mode"
+msgstr "в этом режиме не действует"
+
+msgid "Log"
+msgstr "Журнал"
+
+msgid "No XrayWRT log lines yet."
+msgstr "В журнале пока нет записей XrayWRT."
+
+msgid "System log is not available."
+msgstr "Журнал недоступен."
+
+msgid "Cannot read the log: %s"
+msgstr "Не удалось прочитать журнал: %s"
+
+msgid "Check again"
+msgstr "Проверить снова"
+
+msgid "Details"
+msgstr "Подробности"
+
+msgid "Everything via VPN except exclusions"
+msgstr "Всё через VPN, кроме исключений"
+
+msgid "Only selected sites via VPN"
+msgstr "Через VPN только выбранное"
+
+msgid "Subscription URL"
+msgstr "Ссылка на подписку"
+
+msgid "Connect"
+msgstr "Подключить"
+
+msgid "Enter the subscription link that starts with https://"
+msgstr "Введите ссылку на подписку, начинающуюся с https://"
+
+msgid "Subscription connected. XrayWRT is starting."
+msgstr "Подписка подключена. XrayWRT запускается."
+
+msgid "Connect a subscription"
+msgstr "Подключите подписку"
+
+msgid "XrayWRT started."
+msgstr "XrayWRT запущен."
+
+msgid "XrayWRT stopped. All traffic bypasses the VPN. Starts again after a router reboot."
+msgstr "XrayWRT остановлен. Весь трафик идёт без VPN. Снова запустится после перезагрузки роутера."
+
+msgid "XrayWRT stopped. All traffic bypasses the VPN."
+msgstr "XrayWRT остановлен. Весь трафик идёт без VPN."
+
+msgid "XrayWRT restarted."
+msgstr "XrayWRT перезапущен."
+
+msgid "Stop"
+msgstr "Остановить"
+
+msgid "Start"
+msgstr "Запустить"
+
+msgid "Restart"
+msgstr "Перезапустить"
+
+msgid "Running"
+msgstr "Работает"
+
+msgid "Stopped"
+msgstr "Остановлен"
+
+msgid "Running, but DNS does not answer — see Help"
+msgstr "Работает, но DNS не отвечает — см. «Помощь»"
+
+msgid "Starts automatically when the router boots"
+msgstr "Запускается автоматически при включении роутера"
+
+msgid "Does not start when the router boots"
+msgstr "Не запускается при включении роутера"
+
+msgid "Update subscription"
+msgstr "Обновить подписку"
+
+msgid "Data used"
+msgstr "Использовано трафика"
+
+msgid "Expires"
+msgstr "Действует до"
+
+msgid "Never"
+msgstr "Бессрочно"
+
+msgid "Last update"
+msgstr "Последнее обновление"
+
+msgid "Not yet"
+msgstr "Ещё не было"
+
+msgid "Auto-update"
+msgstr "Автообновление"
+
+msgid "every %d h"
+msgstr "каждые %d ч"
+
+msgid "Off"
+msgstr "Выключено"
+
+msgid "Manual only: the provider does not set an update period"
+msgstr "Только вручную: в подписке нет расписания обновлений"
+
+msgid "Support"
+msgstr "Поддержка"
+
+msgid "Website"
+msgstr "Сайт"
+
+msgid "Subscription updated."
+msgstr "Подписка обновлена."
+
+msgid "Subscription"
+msgstr "Подписка"
+
+msgid "XrayWRT"
+msgstr "XrayWRT"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Update now"
+msgstr "Обновить подписку"
+
+msgid "Enter the subscription link, or press Save to stop using a subscription."
+msgstr "Введите ссылку на подписку или нажмите «Сохранить», чтобы отказаться от подписки."
+
+msgid "Subscription settings saved."
+msgstr "Настройки подписки сохранены."
+
+msgid "Configuration checked and saved."
+msgstr "Конфигурация проверена и сохранена."
+
+msgid "One IP address or subnet per line, or a link to a list."
+msgstr "По одному IP-адресу или подсети в строке либо ссылка на список."
+
+msgid "Entry format"
+msgstr "Формат записей"
+
+msgid "Hide entry format"
+msgstr "Скрыть формат записей"
+
+msgid "Devices via VPN"
+msgstr "Устройства через VPN"
+
+msgid "Traffic from these interfaces is handled. Usually br-lan."
+msgstr "Обрабатывается трафик с этих интерфейсов. Обычно br-lan."
+
+msgid "Block external IPv6 from clients"
+msgstr "Блокировать внешний IPv6 клиентов"
+
+msgid "Keep external IPv6 of client devices from reaching the internet without the VPN."
+msgstr "Не пускать IPv6 устройств в интернет мимо VPN."
+
+msgid "No effect in the current mode."
+msgstr "В текущем режиме не действует."
+
+msgid "Block QUIC for VPN traffic"
+msgstr "Блокировать QUIC для трафика через VPN"
+
+msgid "Disables HTTP/3 so sites work more reliably through the VPN."
+msgstr "Отключает HTTP/3, чтобы сайты через VPN работали стабильнее."
+
+msgid "Time sync (NTP) works even when the VPN is down."
+msgstr "Синхронизация времени (NTP) работает и без VPN."
+
+msgid "Downloads the subscription directly, even when the VPN is down."
+msgstr "Скачивает подписку напрямую, даже при сбое VPN."
+
+msgid "Route outbound NetBird through VPN"
+msgstr "Пускать исходящий NetBird через VPN"
+
+msgid "Outbound NetBird connections are handed to the VPN, which applies your rules."
+msgstr "Исходящие соединения NetBird передаются VPN, дальше действуют ваши правила."
+
+msgid "Remote lists"
+msgstr "Списки по ссылкам"
+
+msgid "Update remote lists"
+msgstr "Обновить списки по ссылкам"
+
+msgid "Remote lists updated."
+msgstr "Списки по ссылкам обновлены."
+
+msgid "Remote lists are up to date."
+msgstr "Списки по ссылкам актуальны."
+
+msgid "Add a device"
+msgstr "Добавить устройство"
+
+msgid "Add a device…"
+msgstr "Добавить устройство…"
+
+msgid "unknown"
+msgstr "неизвестно"
+
+msgid "\"%s\" has invalid lines: %s"
+msgstr "В поле «%s» неверные строки: %s"
+
+msgid "Configuration is unchanged."
+msgstr "Конфигурация не изменилась."
+
+msgid "Configuration not checked yet (it is checked at start)"
+msgstr "Конфигурация ещё не проверялась (проверка при запуске)"
+
+msgid "DNS mode"
+msgstr "Режим DNS"
+
+msgid "Devices always direct"
+msgstr "Устройства напрямую"
+
+msgid "Disabled"
+msgstr "Выключено"
+
+msgid "Enabled"
+msgstr "Включено"
+
+msgid "Only when you press Update now."
+msgstr "Только по кнопке «Обновить подписку»."
+
+msgid "Provider lists"
+msgstr "Списки из подписки"
+
+msgid "Provider settings"
+msgstr "Настройки из подписки"
+
+msgid "Subscription is up to date."
+msgstr "Подписка уже актуальна."
+
+msgid "Unknown:"
+msgstr "Неизвестно:"
+
+msgid "Update automatically"
+msgstr "Обновлять автоматически"
+
+msgid "Update interval from the subscription: every %d h."
+msgstr "По расписанию подписки: каждые %d ч."
+
+msgid "none"
+msgstr "нет"
+
+msgid "VPN %d, devices %d, direct %d, direct devices %d"
+msgstr "VPN %d, устройства %d, напрямую %d, устройства напрямую %d"
+
+msgid "%s (priority %s)"
+msgstr "%s (приоритет %s)"
+
+msgid "(could not read the configuration)"
+msgstr "(не удалось прочитать конфигурацию)"
+
+msgid "Configuration has errors"
+msgstr "В конфигурации есть ошибки"
+
+msgid "Hide details"
+msgstr "Скрыть подробности"
+
+msgid "Hide the log"
+msgstr "Скрыть журнал"
+
+msgid "Loading…"
+msgstr "Загрузка…"
+
+msgid "Over 90% of the subscription traffic is used."
+msgstr "Израсходовано больше 90% трафика подписки."
+
+msgid "Show details"
+msgstr "Показать подробности"
+
+msgid "Show the log"
+msgstr "Показать журнал"
+
+msgid "Stopped because of an error."
+msgstr "Остановлен из-за ошибки."
+
+msgid "What to do: update the subscription or fix the configuration."
+msgstr "Что делать: обновите подписку или исправьте конфигурацию."
+
+msgid "Details: %s"
+msgstr "Подробности: %s"
+
+msgid "Open Help"
+msgstr "Открыть «Помощь»"
+
+msgid "The previous link is kept."
+msgstr "Прежняя ссылка сохранена."
+
+msgid "The provider refused access (HTTP %s). The subscription may have expired or the link is wrong."
+msgstr "Сервер подписки отказал в доступе (HTTP %s). Возможно, подписка закончилась или ссылка неверна."
+
+msgid "The provider server answered with an error (HTTP %s). Try again later."
+msgstr "Сервер подписки ответил ошибкой (HTTP %s). Попробуйте позже."
+
+msgid "Subscription expires on %s. Renew it with the service."
+msgstr "Подписка заканчивается %s. Продлите её у сервиса."
+
+msgid "Subscription expired. Renew it with the service."
+msgstr "Подписка закончилась. Продлите её у сервиса."
+
+msgid "The subscription is too large."
+msgstr "Подписка слишком большая."
+
+msgid "Subscription not found (HTTP 404). Check the link in your service account."
+msgstr "Подписка не найдена (HTTP 404). Проверьте ссылку в личном кабинете сервиса."
+
+msgid "The subscription traffic is used up."
+msgstr "Трафик подписки закончился."
+
+msgid "The router did not answer in time. The operation may still be running; check again in a minute."
+msgstr "Роутер не ответил вовремя. Операция может ещё выполняться; проверьте снова через минуту."
+
+msgid "Access denied. Log in to LuCI again, or ask for write access."
+msgstr "Доступ запрещён. Войдите в LuCI снова или попросите права на изменение."
+
+msgid "Another operation is running: \"%s\". Wait until it finishes."
+msgstr "Уже выполняется другая операция: «%s». Дождитесь её завершения."
+
+msgid "The operation was interrupted (for example, by a router reboot). You can run it again."
+msgstr "Операция прервана (например, перезагрузкой роутера). Её можно запустить снова."
+
+msgid "The subscription returned an empty configuration."
+msgstr "Подписка вернула пустую конфигурацию."
+
+msgid "The remote lists are larger than 8 MiB in total. Remove some list links or use smaller lists."
+msgstr "Списки по ссылкам занимают больше 8 МБ суммарно. Уберите часть ссылок на списки или используйте меньшие списки."
+
+msgid "Connecting the subscription"
+msgstr "Подключение подписки"
+
+msgid "Subscription update"
+msgstr "Обновление подписки"
+
+msgid "Remote list update"
+msgstr "Обновление списков по ссылкам"
+
+msgid "Applying lists and settings"
+msgstr "Применение списков и настроек"
+
+msgid "Starting, stopping or restarting XrayWRT"
+msgstr "Запуск, остановка или перезапуск XrayWRT"
+
+msgid "You can close the page — the operation continues on the router."
+msgstr "Можно закрыть страницу — операция продолжится на роутере."
+
+msgid "No devices found in DHCP. Enter a MAC address, e.g. aa:bb:cc:dd:ee:ff."
+msgstr "В списке DHCP нет устройств. Введите MAC-адрес, например aa:bb:cc:dd:ee:ff."
+
+msgid "Lost connection to the router while waiting for the result."
+msgstr "Во время ожидания результата потеряна связь с роутером."
+
+msgid "\"%s\" is running…"
+msgstr "Выполняется операция «%s»…"
+
+msgid "\"%s\" failed: %s"
+msgstr "«%s» не удалось: %s"
+
+msgid "\"%s\" finished. Reload the page to see the result; your unsaved edits are still here."
+msgstr "«%s» завершено. Обновите страницу, чтобы увидеть результат; несохранённые правки пока на месте."
+
+msgid "The operation failed."
+msgstr "Операция не выполнена."
+
+msgid "Invalid upload path."
+msgstr "Недопустимый путь загрузки."
+
+msgid "The upload was incomplete. Try again."
+msgstr "Файл загружен не полностью. Попробуйте снова."
+
+msgid "Unexpected response from the router."
+msgstr "Неожиданный ответ роутера."
+
+msgid "Starting…"
+msgstr "Запускается…"
+
+msgid "Automatic updates will replace the restored configuration again."
+msgstr "Автоматическое обновление снова заменит восстановленную конфигурацию."
+
+msgid "Everything goes via VPN except the addresses and devices below."
+msgstr "Через VPN идёт всё, кроме адресов и устройств ниже."
+
+msgid "Only the addresses and devices below, plus the sites your subscription selects, go via VPN; everything else goes direct."
+msgstr "Через VPN идут только адреса и устройства ниже и сайты, выбранные конфигурацией; остальное — напрямую."
+
+msgid "Use a MAC address: it covers IPv4 and IPv6."
+msgstr "Лучше указывать MAC-адрес — он действует и для IPv4, и для IPv6."
+
+msgid "Cannot load the lists: %s"
+msgstr "Не удалось загрузить списки: %s"
+
+msgid "Reload the page to try again."
+msgstr "Перезагрузите страницу, чтобы попробовать снова."
+
+msgid "Not connected now: %s"
+msgstr "Сейчас не подключены: %s"
+
+msgid "Add as"
+msgstr "Добавить как"
+
+msgid "MAC (IPv4 + IPv6)"
+msgstr "MAC (IPv4 + IPv6)"
+
+msgid "IP address"
+msgstr "IP-адрес"
+
+msgid "%s (%s, private MAC)"
+msgstr "%s (%s, частный MAC)"
+
+msgid "Keep the device's private Wi-Fi address fixed for this network, or this rule will stop matching."
+msgstr "Закрепите частный адрес Wi-Fi устройства для этой сети, иначе правило перестанет действовать."
+
+msgid "Lists were saved, but settings could not be saved: %s. Review the settings and try Save & Apply again."
+msgstr "Списки сохранены, но сохранить настройки не удалось: %s. Проверьте настройки и снова нажмите «Сохранить и применить»."
+
+msgid "Changes applied."
+msgstr "Изменения применены."
+
+msgid "Last error: %s"
+msgstr "Последняя ошибка: %s"
+
+msgid "Other VPN packages are installed: %s"
+msgstr "Установлены другие VPN-пакеты: %s"
+
+msgid "These packages also change DNS and the firewall. Use only one VPN package at a time."
+msgstr "Эти пакеты тоже меняют DNS и межсетевой экран. Одновременно используйте только один VPN-пакет."
+
+msgid "Little free flash: %d MB"
+msgstr "Мало свободной флеш-памяти: %d МБ"
+
+msgid "Free some space or the core update may fail."
+msgstr "Освободите место, иначе обновление ядра может не удаться."
+
+msgid "Little free memory: %d MB"
+msgstr "Мало свободной памяти: %d МБ"
+
+msgid "B"
+msgstr "Б"
+
+msgid "KB"
+msgstr "КБ"
+
+msgid "MB"
+msgstr "МБ"
+
+msgid "GB"
+msgstr "ГБ"
+
+msgid "TB"
+msgstr "ТБ"
+
+msgid "%d MB"
+msgstr "%d МБ"
+
+msgid "Cannot load diagnostics: %s"
+msgstr "Не удалось загрузить диагностику: %s"
+
+msgid "XrayWRT is not running; this is what it would pass at start."
+msgstr "XrayWRT не запущен; это то, что будет передано при запуске."
+
+msgid "Cannot load the page: %s"
+msgstr "Не удалось загрузить страницу: %s"
+
+msgid "Try again"
+msgstr "Повторить"
+
+msgid "The subscription link uses plain http"
+msgstr "Ссылка на подписку использует обычный http"
+
+msgid "Anyone on the way can change your configuration. Ask your provider for an https link."
+msgstr "При передаче конфигурацию могут подменить. Попросите у сервиса ссылку https://"
+
+msgid "Automatic update"
+msgstr "Автоматическое обновление"
+
+msgid "Free temporary storage"
+msgstr "Свободно во временном хранилище"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Update"
+msgstr "Обновить"
+
+msgid "XrayWRT restarts after the update; the internet drops for a few seconds."
+msgstr "После обновления XrayWRT перезапустится — интернет пропадёт на несколько секунд."
+
+msgid "Without a subscription XrayWRT starts with the current configuration; by default all traffic goes direct."
+msgstr "Без подписки XrayWRT запустится с текущей конфигурацией: по умолчанию весь трафик идёт напрямую."
+
+msgid "The upload failed. Check your LuCI permissions and try again."
+msgstr "Не удалось загрузить файл. Проверьте права доступа в LuCI и попробуйте снова."
+
+msgid "Nothing was changed, the previous configuration is still running."
+msgstr "Ничего не изменено, работает прежняя конфигурация."
+
+msgid "The downloaded core file is damaged. Try again."
+msgstr "Скачанный файл ядра повреждён. Попробуйте ещё раз."
+
+msgid "The core is already being updated."
+msgstr "Обновление ядра уже выполняется."
+
+msgid "There is no previous configuration."
+msgstr "Предыдущей конфигурации нет."
+
+msgid "The \"%s\" list is larger than 1 MiB."
+msgstr "Список «%s» больше 1 МБ."
+
+msgid "XrayWRT could not start. See the log on the Help page."
+msgstr "XrayWRT не запустился. Подробности — в журнале на странице «Помощь»."
+
+msgid "Failed to apply nftables policy: see %s. Restart XrayWRT; if it happens again, see the log on Help."
+msgstr "Не удалось применить правила nftables: см. %s. Перезапустите XrayWRT; если повторится — см. журнал в «Помощи»."
+
+msgid "Fix the configuration first (see the item above), then press Start on Home."
+msgstr "Сначала исправьте конфигурацию (пункт выше), затем нажмите «Запустить» на странице «Главная»."
+
+msgid "Press Start on Home."
+msgstr "Нажмите «Запустить» на странице «Главная»."
+
+msgid "XrayWRT is not running"
+msgstr "Служба XrayWRT не работает"
+
+msgid "Traffic rules are not active"
+msgstr "Правила трафика не применены"
+
+msgid "No problems found."
+msgstr "Проблем не найдено."
+
+msgid "%d problem found. Start with the first one."
+msgid_plural "%d problems found. Start with the first one."
+msgstr[0] "Найдена %d проблема. Начните с первой."
+msgstr[1] "Найдено %d проблемы. Начните с первой."
+msgstr[2] "Найдено %d проблем. Начните с первой."
+
+msgid "Cannot load subscription settings: %s"
+msgstr "Не удалось загрузить настройки подписки: %s"
+
+msgid "Subscription updates, including automatic ones, replace your edits."
+msgstr "Обновления подписки, включая автоматические, заменят ваши правки."
+
+msgid "Stop using the subscription?"
+msgstr "Отключить подписку?"
+
+msgid "Disable"
+msgstr "Отключить"
+
+msgid "(%d in total)"
+msgstr "(всего %d)"
+
+msgid "Xray core update"
+msgstr "Обновление ядра Xray"
+
+msgid "Rule database update"
+msgstr "Обновление баз правил"
+
+msgid "Checking and applying the configuration"
+msgstr "Проверка и применение конфигурации"
+
+msgid "Restoring the previous configuration"
+msgstr "Возврат предыдущей конфигурации"
+
+msgid "Xray started, but the routing rules could not be applied: %s"
+msgstr "Xray запущен, но правила маршрутизации не применились: %s"
+
+msgid "The Xray core was updated, but XrayWRT could not restart: %s. Press Start on Home."
+msgstr "Ядро Xray обновлено, но XrayWRT не перезапустился: %s. Нажмите «Запустить» на странице «Главная»."
+
+msgid "Xray rejected the configuration."
+msgstr "Xray не принял конфигурацию."
+
+msgid "Not enough memory to check the configuration. Try again in a minute."
+msgstr "Не хватает памяти, чтобы проверить конфигурацию. Повторите через минуту."
+
+msgid "This link returns vless://, vmess://… links. Ask the service for an Xray JSON subscription link."
+msgstr "Получены ссылки vless://, vmess://… Попросите у сервиса подписку Xray JSON."
+
+msgid "This is Clash/Mihomo (YAML). Ask the service for an Xray JSON subscription link."
+msgstr "Это Clash/Mihomo (YAML). Попросите у сервиса ссылку на подписку Xray JSON."
+
+msgid "The configuration is not valid JSON."
+msgstr "Ошибка в формате JSON."
+
+msgid "The configuration has no outbounds."
+msgstr "В конфигурации нет outbounds."
+
+msgid "The configuration is invalid: %s"
+msgstr "Конфигурация некорректна: %s"
+
+msgid "The configuration needs %s, but the subscription does not supply it. Upload the file on the Updates page."
+msgstr "Конфигурации нужен файл %s, но подписка его не даёт. Загрузите файл на странице «Обновления»."
+
+msgid "The Xray core is not installed. Install it on the Updates page."
+msgstr "Ядро Xray не установлено. Установите его на странице «Обновления»."
+
+msgid "Not enough free flash for the Xray core: %s MiB needed, %s MiB free."
+msgstr "Не хватает флеш-памяти для ядра Xray: нужно %s МБ, свободно %s МБ."
+
+msgid "Not enough free memory to download the Xray core: %s MiB needed, %s MiB available."
+msgstr "Не хватает оперативной памяти для загрузки ядра Xray: нужно %s МБ, доступно %s МБ."
+
+msgid "The core file does not run on this router. The current core is kept."
+msgstr "Файл ядра не запускается на этом роутере. Текущее ядро оставлено."
+
+msgid "The configuration is empty: nothing was changed."
+msgstr "Конфигурация пустая: ничего не изменено."
+
+msgid "The configuration is larger than 8 MiB."
+msgstr "Конфигурация больше 8 МБ."
+
+msgid "XrayWRT settings are damaged. Save the Advanced page again or reinstall the package."
+msgstr "Настройки XrayWRT повреждены. Сохраните страницу «Расширенные» ещё раз или переустановите пакет."
+
+msgid "Configuration file not found: %s"
+msgstr "Файл конфигурации не найден: %s"
+
+msgid "Subscription updated; XrayWRT restarted."
+msgstr "Подписка обновлена; XrayWRT перезапущен."
+
+msgid "Configuration checked and applied; Xray restarted."
+msgstr "Конфигурация проверена и применена; Xray перезапущен."
+
+msgid "Save configuration"
+msgstr "Сохранить конфигурацию"
+
+msgid "Validate"
+msgstr "Проверить"
+
+msgid "Xray JSON with outbounds: one configuration or an array. For an array, choose by remarks on Home. XrayWRT adds router inbounds, DNS and service rules. The xraywrt key holds router settings."
+msgstr "Xray JSON с outbounds: одна конфигурация или массив. Вариант из массива выбирается по remarks на «Главной». XrayWRT добавляет входящие подключения роутера, DNS и служебные правила. Ключ xraywrt — настройки роутера."
+
+msgid "Updating replaces your unsaved configuration edits. Continue?"
+msgstr "Обновление заменит ваши несохранённые правки конфигурации. Продолжить?"
+
+msgid "XrayWRT keeps the current configuration, but it will no longer be updated."
+msgstr "XrayWRT оставит текущую конфигурацию, но она больше не будет обновляться."
+
+msgid "Checking…"
+msgstr "Проверка…"
+
+msgid "The configuration is valid: Xray accepts it."
+msgstr "Конфигурация корректна: Xray её принимает."
+
+msgid "The configuration is invalid."
+msgstr "Конфигурация некорректна."
+
+msgid "Restore the previous configuration"
+msgstr "Вернуть предыдущую конфигурацию"
+
+msgid "Replace the current configuration with the previous one?"
+msgstr "Заменить текущую конфигурацию предыдущей?"
+
+msgid "Cannot load the configuration: %s"
+msgstr "Не удалось загрузить конфигурацию: %s"
+
+msgid "config.json"
+msgstr "config.json"
+
+msgid "Configuration passed to Xray"
+msgstr "Конфигурация, которую получает Xray"
+
+msgid "Your configuration with router inbounds, DNS and service rules added, and the xraywrt key removed. Keys, passwords and IDs are hidden as ***."
+msgstr "Ваша конфигурация с входящими подключениями роутера, DNS и служебными правилами, без ключа xraywrt. Ключи, пароли и идентификаторы скрыты как ***."
+
+msgid "Subscription link. Leave empty to use your own configuration."
+msgstr "Ссылка на подписку. Оставьте пустой для своей конфигурации."
+
+msgid "Xray configuration"
+msgstr "Конфигурация Xray"
+
+msgid "Show the configuration editor"
+msgstr "Показать редактор конфигурации"
+
+msgid "Hide the configuration editor"
+msgstr "Скрыть редактор конфигурации"
+
+msgid "Show the configuration passed to Xray"
+msgstr "Показать конфигурацию, которую получает Xray"
+
+msgid "Hide the configuration passed to Xray"
+msgstr "Скрыть конфигурацию, которую получает Xray"
+
+msgid "Xray core %s is up to date."
+msgstr "Ядро Xray %s актуально."
+
+msgid "Xray core updated to %s; XrayWRT restarted."
+msgstr "Ядро Xray обновлено до %s; XrayWRT перезапущен."
+
+msgid "Xray core updated to %s."
+msgstr "Ядро Xray обновлено до %s."
+
+msgid "Check for updates"
+msgstr "Проверить обновления"
+
+msgid "Update the core"
+msgstr "Обновить ядро"
+
+msgid "Free flash"
+msgstr "Свободно на флеше"
+
+msgid "Free memory"
+msgstr "Свободно в памяти"
+
+msgid "Not enough free memory to download this core."
+msgstr "Не хватает оперативной памяти, чтобы скачать это ядро."
+
+msgid "Update without a backup copy?"
+msgstr "Обновить без резервной копии?"
+
+msgid "If the new core does not start, there is no working core until you install one again, and traffic goes direct."
+msgstr "Если новое ядро не запустится, рабочего ядра не будет, пока вы не установите его заново, а трафик пойдёт напрямую."
+
+msgid "A new core is available: %s."
+msgstr "Доступно новое ядро: %s."
+
+msgid "The core is up to date."
+msgstr "Ядро актуально."
+
+msgid "The file is larger than 64 MB."
+msgstr "Файл больше 64 МБ."
+
+msgid "%s (package)"
+msgstr "%s (пакет)"
+
+msgid "No update available."
+msgstr "Обновлений нет."
+
+msgid "Xray core"
+msgstr "Ядро Xray"
+
+msgid "Core version"
+msgstr "Версия ядра"
+
+msgid "not installed"
+msgstr "не установлено"
+
+msgid "Core source"
+msgstr "Источник ядра"
+
+msgid "File"
+msgstr "Файл"
+
+msgid "Source"
+msgstr "Источник"
+
+msgid "Present"
+msgstr "Есть"
+
+msgid "Size"
+msgstr "Размер"
+
+msgid "Date"
+msgstr "Дата"
+
+msgid "uploaded or missing"
+msgstr "загружен вручную или отсутствует"
+
+msgid "The configuration uses no rule database files."
+msgstr "Конфигурация не использует базы правил."
+
+msgid "Update rule databases"
+msgstr "Обновить базы правил"
+
+msgid "Rule databases updated."
+msgstr "Базы правил обновлены."
+
+msgid "Rule database file"
+msgstr "Файл базы правил"
+
+msgid "Upload"
+msgstr "Загрузить"
+
+msgid "Choose the .dat file first."
+msgstr "Сначала выберите файл .dat."
+
+msgid "The name must end with .dat and contain only letters, digits, dot, dash and underscore."
+msgstr "Имя должно заканчиваться на .dat и содержать только латинские буквы, цифры, точку, дефис и подчёркивание."
+
+msgid "Rule databases"
+msgstr "Базы правил"
+
+msgid "Rule databases (geodata) are the geosite/geoip files your configuration needs. The subscription lists them and Xray refreshes them on its own schedule; missing files are downloaded before start."
+msgstr "Базы правил (geodata) — это файлы geosite и geoip, нужные конфигурации. Xray обновляет их по своему расписанию. Недостающие файлы скачиваются перед запуском."
+
+msgid "Upload a file"
+msgstr "Загрузить файл"
+
+msgid "Updates"
+msgstr "Обновления"
+
+msgid "Install the Xray core first (Updates page)."
+msgstr "Сначала установите ядро Xray (страница «Обновления»)."
+
+msgid "Xray core installed"
+msgstr "Ядро Xray установлено"
+
+msgid "Xray core is not installed"
+msgstr "Ядро Xray не установлено"
+
+msgid "Open the Updates page and install the core."
+msgstr "Откройте страницу «Обновления» и установите ядро."
+
+msgid "Update the subscription or fix the configuration on the Advanced page."
+msgstr "Обновите подписку или исправьте конфигурацию на странице «Расширенные»."
+
+msgid "Xray says: %s"
+msgstr "Сообщение Xray: %s"
+
+msgid "Xray DNS does not answer: traffic goes direct until it recovers"
+msgstr "DNS не отвечает: трафик идёт напрямую, пока он не восстановится"
+
+msgid "Xray cannot resolve names: check that the VPN servers and DNS servers in the config are reachable."
+msgstr "Xray не может определить адреса сайтов: проверьте, доступны ли VPN-серверы и DNS-серверы из конфигурации."
+
+msgid "Xray does not answer DNS queries"
+msgstr "Xray не отвечает на DNS-запросы"
+
+msgid "Xray answers DNS queries"
+msgstr "Xray отвечает на DNS-запросы"
+
+msgid "These servers answer next to Xray, so some sites may bypass the VPN. Remove them from Network → DHCP and DNS."
+msgstr "Эти серверы отвечают в обход Xray, поэтому часть сайтов может идти мимо VPN. Удалите их из «Сеть → DHCP и DNS»."
+
+msgid "Xray may be stopped by the system when memory runs out. Stop other services or use a smaller configuration."
+msgstr "Система может остановить Xray, когда кончится память. Остановите другие программы или используйте конфигурацию поменьше."
+
+msgid "Xray memory"
+msgstr "Память Xray"
+
+msgid "XrayWRT temporary files (runtime config, downloads)"
+msgstr "Временные файлы XrayWRT (рабочая конфигурация, загрузки)"
+
+msgid "Not checked yet: Xray checks the configuration at start."
+msgstr "Ещё не проверялась: Xray проверяет конфигурацию при запуске."
+
+msgid "Xray accepted the configuration."
+msgstr "Xray принял конфигурацию."
+
+msgid "Xray rejected the configuration:"
+msgstr "Xray не принял конфигурацию:"
+
+msgid "Last configuration check"
+msgstr "Последняя проверка конфигурации"
+
+msgid "Paste your subscription link. Settings are applied automatically."
+msgstr "Вставьте ссылку на подписку — настройки применятся автоматически."
+
+msgid "No subscription: XrayWRT uses the configuration entered on the Advanced page."
+msgstr "Подписки нет: XrayWRT использует конфигурацию со страницы «Расширенные»."
+
+msgid "Install Xray core"
+msgstr "Установить ядро Xray"
+
+msgid "Xray core %s installed."
+msgstr "Ядро Xray %s установлено."
+
+msgid "XrayWRT needs the Xray core. Download it once from GitHub: about 17 MB on the router with the default core."
+msgstr "Для работы нужно ядро Xray. Оно скачивается один раз с GitHub: около 17 МБ на роутере с ядром по умолчанию."
+
+msgid "Stopped: Xray did not accept the configuration."
+msgstr "Остановлено: Xray не принял конфигурацию."
+
+msgid "Mode: %s"
+msgstr "Режим: %s"
+
+msgid "No VPN DNS is configured: the DNS servers of the internet connection (WAN) are used."
+msgstr "DNS для VPN не задан: используются DNS-серверы интернет-подключения (WAN)."
+
+msgid "The subscription setting \"%s\" is unknown or invalid and was ignored."
+msgstr "Настройка подписки «%s» неизвестна или неверна и пропущена."
+
+msgid "Server \"%s\" is not in the configuration; \"%s\" is used."
+msgstr "Сервера «%s» нет в конфигурации; используется «%s»."
+
+msgid "Configuration warnings"
+msgstr "Предупреждения конфигурации"
+
+msgid "Change the server"
+msgstr "Сменить сервер"
+
+msgid "XrayWRT restarts Xray with the server \"%s\"; the internet drops for a few seconds."
+msgstr "XrayWRT перезапустит Xray с сервером «%s»; интернет пропадёт на несколько секунд."
+
+msgid "Change"
+msgstr "Изменить"
+
+msgid "Server"
+msgstr "Сервер"
+
+msgid "Routing"
+msgstr "Маршрутизация"
+
+msgid "DNS"
+msgstr "DNS"
+
+msgid "Time sync without Xray"
+msgstr "Синхронизация времени без Xray"
+
+msgid "Redirect client DNS to the router"
+msgstr "Перенаправлять DNS клиентов на роутер"
+
+msgid "The router answers plain DNS requests, even to servers set on devices. Encrypted DNS (DoH/DoT) is not intercepted."
+msgstr "Роутер отвечает на обычные DNS-запросы, даже к серверам из настроек устройств. Шифрованный DNS (DoH/DoT) не перехватывается."
+
+msgid "Download the subscription directly"
+msgstr "Скачивать подписку напрямую"
+
+msgid "Other DNS query types (TXT, SRV, MX…)"
+msgstr "Прочие типы DNS-запросов (TXT, SRV, MX…)"
+
+msgid "Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Direct forwarding exposes these queries to your internet provider."
+msgstr "Xray отвечает только на A и AAAA. На прочие типы приходит пустой ответ, пока вы их не пересылаете. При пересылке напрямую эти запросы видит ваш интернет-провайдер."
+
+msgid "Do not forward"
+msgstr "Не пересылать"
+
+msgid "Forward directly"
+msgstr "Пересылать напрямую"
+
+msgid "Forward through the VPN"
+msgstr "Пересылать через VPN"
+
+msgid "DNS server for these queries"
+msgstr "DNS-сервер для этих запросов"
+
+msgid "IP[:port]. Required through the VPN. Direct: empty uses the first DNS server of the internet connection."
+msgstr "IP[:порт]. Для VPN обязателен. Напрямую: пусто — первый DNS-сервер интернет-подключения."
+
+msgid "Outbound tag"
+msgstr "Тег outbound"
+
+msgid "Choose an outbound from the original configuration. Chained outbounds keep their configured route."
+msgstr "Выберите outbound из исходной конфигурации. Цепочки outbound сохраняют заданный маршрут."
+
+msgid "Choose an available outbound from the configuration."
+msgstr "Выберите доступный outbound из конфигурации."
+
+msgid "Xray log detail"
+msgstr "Подробность журнала Xray"
+
+msgid "The \"fakedns\" section of the configuration is replaced by the one XrayWRT generates."
+msgstr "Раздел «fakedns» из конфигурации заменён разделом, который создаёт XrayWRT."
+
+msgid "The outbound \"%s\" had the mark %s; XrayWRT replaced it with %s."
+msgstr "У исходящего подключения «%s» была метка %s; XrayWRT заменил её на %s."
+
+msgid "The DNS tag \"%s\" is renamed to %s in the routing rules."
+msgstr "Тег DNS «%s» в правилах маршрутизации переименован в %s."
+
+msgid "Errors"
+msgstr "Ошибки"
+
+msgid "Warnings"
+msgstr "Предупреждения"
+
+msgid "Information"
+msgstr "Сведения"
+
+msgid "Debug"
+msgstr "Отладка"
+
+msgid "Override for %s"
+msgstr "Закреплённый выход для %s"
+
+msgid "Auto"
+msgstr "Авто"
+
+msgid "Balancer override saved."
+msgstr "Закреплённый выход сохранён."
+
+msgid "Balancer tag"
+msgstr "Тег балансировщика"
+
+msgid "Current target"
+msgstr "Текущий выход"
+
+msgid "Override"
+msgstr "Закреплённый выход"
+
+msgid "A pinned server is used even when it is down; there is no automatic fallback."
+msgstr "Закреплённый сервер используется, даже если он недоступен; автоматического перехода на резервный нет."
+
+msgid "Configuration checked and applied without restarting Xray."
+msgstr "Конфигурация проверена и применена без перезапуска Xray."
+
+msgid "Subscription updated without restarting Xray."
+msgstr "Подписка обновлена без перезапуска Xray."
+
+msgid "Xray is not running"
+msgstr "Xray не запущен"
+
+msgid "Not checked: the time limit was reached."
+msgstr "Не проверено: истёк лимит времени."
+
+msgid "Cannot read the balancer state from Xray."
+msgstr "Не удалось получить состояние балансировщика от Xray."
+
+msgid "A balancer tag with \"=\" cannot be pinned."
+msgstr "Выход для балансировщика со знаком «=» в теге закрепить нельзя."
+
+msgid "Saved override %s is not applied."
+msgstr "Сохранённый закреплённый выход %s не применён."
+
+msgid "Saved override %s is not applied: the configuration has no such balancer."
+msgstr "Сохранённый закреплённый выход %s не применён: в конфигурации нет такого балансировщика."
+
+msgid "Remove the saved override of %s"
+msgstr "Удалить сохранённый закреплённый выход для %s"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "As provider: %s"
+msgstr "Как в конфигурации: %s"
+
+msgid "Choosing your own value stops following the provider."
+msgstr "Если выбрать своё значение, изменения из подписки больше не будут применяться."
+
+msgid "Off (only manually)"
+msgstr "Выключено (только вручную)"
+
+msgid "7 days"
+msgstr "7 дней"
+
+msgid "%s h"
+msgstr "%s ч"
+
+msgid "Use subscription settings or set your own values. Overrides apply to the current subscription. \"Save & Apply\" restarts Xray if the configuration changes."
+msgstr "Используйте настройки подписки или задайте свои. Ваш выбор сохраняется для текущей подписки. «Сохранить и применить» перезапускает Xray при изменении конфигурации."
+
+msgid "One server, nothing to choose"
+msgstr "Один сервер, выбирать нечего"
+
+msgid "Fallback"
+msgstr "Резерв"
+
+msgid "linked file"
+msgstr "файл по ссылке"
+
+msgid "File name"
+msgstr "Имя файла"
+
+msgid "File URL"
+msgstr "Ссылка на файл"
+
+msgid "Add file"
+msgstr "Добавить файл"
+
+msgid "Use an HTTPS URL without spaces."
+msgstr "Укажите ссылку HTTPS без пробелов."
+
+msgid "Actions"
+msgstr "Действия"
+
+msgid "Geodata update schedule"
+msgstr "Обновлять базы правил"
+
+msgid "Applies only when the subscription sets no schedule of its own."
+msgstr "Действует, только если подписка не задала своё расписание."
+
+msgid "Every day at 05:00"
+msgstr "Каждый день в 05:00"
+
+msgid "Every 3 days at 05:00"
+msgstr "Раз в 3 дня в 05:00"
+
+msgid "Every week at 05:00"
+msgstr "Раз в неделю в 05:00"
+
+msgid "Own schedule (%s)"
+msgstr "Своё расписание (%s)"
+
+msgid "Geodata file %s is already supplied by the subscription. Rename your file."
+msgstr "База правил %s уже есть в подписке. Переименуйте свой файл."
+
+msgid "Geodata file %s is listed more than once; the duplicate was skipped."
+msgstr "База правил %s указана несколько раз; повтор пропущен."
+
+msgid "A geodata link was skipped: use NAME.dat and an HTTPS URL without spaces."
+msgstr "Ссылка на базу правил пропущена: укажите имя NAME.dat и ссылку HTTPS без пробелов."
+
+msgid "The geodata schedule is invalid; 0 5 * * * is used."
+msgstr "Неверное расписание обновления баз правил; используется 0 5 * * *."
+
+msgid "Port 53 is used by %s; disable it, XrayWRT routes the router DNS itself."
+msgstr "Порт 53 занят программой %s. Отключите её: XrayWRT сам направляет DNS роутера."
+
+msgid "dnsmasq forwards DNS to %s; some queries would bypass the VPN. Remove them: Network → DHCP and DNS → Forwards."
+msgstr "В dnsmasq заданы серверы перенаправления (%s): часть запросов пойдёт мимо VPN. Удалите их: Сеть → DHCP и DNS → Перенаправления."
+
+msgid "The router is busy with another task (process %s). Try again in a minute."
+msgstr "Роутер занят другой задачей (процесс %s). Повторите через минуту."
+
+msgid "Could not update %s of %s remote lists: %s"
+msgstr "Не удалось обновить списки по ссылкам (%s из %s): %s"
+
+msgid "The router cannot reach the subscription server. Check the internet connection and the link. (%s)"
+msgstr "Роутер не может связаться с сервером подписки. Проверьте интернет и ссылку. (%s)"
+
+msgid "Could not download the geodata file %s (%s). Check the router's internet connection or upload the file on the Updates page."
+msgstr "Не удалось скачать базу правил %s (%s). Проверьте доступ роутера в интернет или загрузите файл на странице «Обновления»."
+
+msgid "Inbound %s (tun) was removed: the router uses TPROXY."
+msgstr "Вход %s (tun) удалён: роутер использует TPROXY."
+
+msgid "Inbound %s now listens on the router only (127.0.0.1): a subscription must not open ports on the network."
+msgstr "Вход %s теперь слушает только на самом роутере (127.0.0.1): подписка не должна открывать порты в сети."
+
+msgid "Inbound %s was removed: a subscription must not listen on a file."
+msgstr "Вход %s удалён: подписка не должна слушать файл."
+
+msgid "The subscription asked Xray to write TLS keys to a file; this was removed."
+msgstr "Подписка просила Xray записывать TLS-ключи в файл; это убрано."
+
+msgid "The subscription has no site recognition: domain rules see only IP addresses."
+msgstr "В подписке не включено распознавание сайтов: доменные правила видят только IP-адреса."
+
+msgid "Not enough free memory for a backup copy of the current core. Details: %s"
+msgstr "Не хватает оперативной памяти для резервной копии текущего ядра. Подробности: %s"
+
+msgid "The new core does not accept your current configuration; the core was not updated. %s"
+msgstr "Новое ядро не принимает текущую конфигурацию, поэтому ядро не обновлено. %s"
+
+msgid "The previous core is restored. Details: %s"
+msgstr "Прежнее ядро возвращено. Подробности: %s"
+
+msgid "The new core did not start, and there was no backup copy of the previous one. Install a core again on the Updates page. Details: %s"
+msgstr "Новое ядро не запустилось, а резервной копии прежнего не было. Установите ядро заново на странице «Обновления». Подробности: %s"
+
+msgid "Core update failed: %s. The previous core could not be restored. Install a core again on the Updates page."
+msgstr "Ошибка обновления ядра: %s. Не удалось вернуть прежнее ядро. Установите ядро заново на странице «Обновления»."
+
+msgid "Core update failed: %s. The previous core is restored, but did not start either."
+msgstr "Ошибка обновления ядра: %s. Прежнее ядро возвращено, но оно тоже не запустилось."
+
+msgid "Core update failed: %s. The old core was removed without a backup. Install a core again on the Updates page."
+msgstr "Ошибка обновления ядра: %s. Старое ядро удалено без резервной копии. Установите ядро заново на странице «Обновления»."
+
+msgid "The Xray core was updated, but XrayWRT could not restart. Press Start on Home."
+msgstr "Ядро Xray обновлено, но XrayWRT не удалось перезапустить. Нажмите «Запустить» на странице «Главная»."
+
+msgid "Advanced"
+msgstr "Расширенные"
+
+msgid "Help"
+msgstr "Помощь"
+
+msgid "Home"
+msgstr "Главная"
+
+msgid "Reset"
+msgstr "Сбросить"
+
+msgid "What goes via VPN"
+msgstr "Что идёт через VPN"
+
+msgid "Changed by you."
+msgstr "Изменено вами."
+
+msgid "Internet traffic goes directly until the VPN recovers."
+msgstr "Интернет работает напрямую, пока VPN не восстановится."
+
+msgid "Return to provider settings"
+msgstr "Вернуть настройки из подписки"
+
+msgid "The VPN server is not responding (provider check)"
+msgstr "VPN-сервер не отвечает (проверка по подписке)"
+
+msgid "VPN DNS is not responding"
+msgstr "DNS не отвечает"
+
+msgid "The subscription has no server check, so XrayWRT notices a failed server only when DNS stops answering."
+msgstr "В конфигурации нет проверки серверов, поэтому XrayWRT замечает отказ сервера, только когда перестаёт отвечать DNS."
+
+msgid "You changed %d provider settings."
+msgstr "Изменено настроек подписки: %d."
+
+msgid "No automatic update schedule. Press \"Update now\" to update manually."
+msgstr "Нет расписания автообновлений. Нажмите «Обновить подписку»."
+
+msgid "Check connection"
+msgstr "Проверить соединение"
+
+msgid "Router's internet IP: %s, country %s"
+msgstr "IP роутера в интернете: %s, страна %s"
+
+msgid "Server: %s (from subscription)"
+msgstr "Сервер: %s (из подписки)"
+
+msgid "Could not check: the check site is unavailable."
+msgstr "Не удалось проверить: сайт проверки недоступен"
+
+msgid "(sites outside the VPN lists go direct)"
+msgstr "(сайты вне списков VPN идут напрямую)"
+
+msgid "Copy report"
+msgstr "Скопировать отчёт"
+
+msgid "Report copied."
+msgstr "Отчёт скопирован."
+
+msgid "Could not copy the report. Allow clipboard access and try again."
+msgstr "Не удалось скопировать отчёт. Разрешите доступ к буферу обмена и повторите попытку."
+
+msgid "The release does not publish a checksum for this core package, so it cannot be installed. Details: %s"
+msgstr "В релизе нет контрольной суммы этого пакета ядра, поэтому его нельзя установить. Подробности: %s"
+
+msgid "The core is installed as the XrayWRT core package. \"Update the core\" updates that package."
+msgstr "Ядро установлено как пакет ядра XrayWRT. Кнопка «Обновить ядро» обновляет этот пакет."
+
+msgid "The core is not available for this router (%s); the current core is kept."
+msgstr "Ядро недоступно для этого роутера (%s); текущее ядро сохранено."
+
+msgid "Core update failed: %s. Could not restart the current core."
+msgstr "Не удалось обновить ядро: %s. Не удалось перезапустить текущее ядро."
+
+msgid "The subscription contains invalid data and was not applied; the previous settings are kept."
+msgstr "Подписка содержит некорректные данные и не применена; предыдущие настройки сохранены."
+
+msgid "Settings were accepted, but routing could not be applied. Restart XrayWRT to retry; review the system log if it fails again."
+msgstr "Настройки сохранены, но применить маршрутизацию не удалось. Перезапустите XrayWRT; если ошибка повторится, откройте журнал."
+
+msgid "The new configuration was accepted, but its backup could not be saved. Check free storage before making more changes."
+msgstr "Новая конфигурация принята, но сохранить резервную копию не удалось. Проверьте свободное место перед следующими изменениями."
+
+msgid "Settings saved. Traffic stays direct until the VPN recovers; XrayWRT will apply them automatically."
+msgstr "Настройки сохранены. Трафик идёт напрямую до восстановления VPN; затем XrayWRT применит их автоматически."
+
+msgid "Settings saved. Start XrayWRT to apply them."
+msgstr "Настройки сохранены. Запустите XrayWRT, чтобы применить их."
+
+msgid "Operation finished."
+msgstr "Операция завершена."
+
+msgid "Lists were saved, but some remote lists could not be fetched. Retry Update remote lists."
+msgstr "Списки сохранены, но загрузить некоторые списки по ссылкам не удалось. Нажмите «Обновить списки по ссылкам» ещё раз."
+
+msgid "The latest changes could not be applied. XrayWRT is using the previous working configuration. Review the settings or update the subscription."
+msgstr "Применить последние изменения не удалось. XrayWRT использует предыдущую рабочую конфигурацию. Проверьте настройки или обновите подписку."
+
+msgid "Settings saved. XrayWRT is still starting."
+msgstr "Настройки сохранены. XrayWRT ещё запускается."
+
+msgid "The geodata file name or path is unsafe. No files were replaced."
+msgstr "Недопустимое имя или путь файла базы правил. Файлы не заменены."
+
+msgid "The geodata file is empty or too large. No files were replaced."
+msgstr "Файл базы правил пуст или слишком велик. Файлы не заменены."
+
+msgid "Not enough router storage for the geodata update and backup. No files were replaced."
+msgstr "На роутере недостаточно места для обновления баз правил и резервной копии. Файлы не заменены."
+
+msgid "The previous geodata could not be restored. Backup files were kept. Do not delete them; free router storage and restart XrayWRT."
+msgstr "Не удалось восстановить прежние базы правил. Резервные копии сохранены. Не удаляйте их; освободите место на роутере и перезапустите XrayWRT."
+
+msgid "These files are not used by the current settings, so they cannot be checked now. They will be checked when settings start using them."
+msgstr "Эти файлы не используются текущими настройками, поэтому проверить их сейчас нельзя. Они будут проверены, когда настройки начнут их использовать."
+
+msgid "The router core rejected the geodata files with your settings. No files were replaced."
+msgstr "Ядро роутера отклонило базы правил с вашими настройками. Файлы не заменены."
+
+msgid "The geodata update could not be saved. The previous files were kept."
+msgstr "Не удалось сохранить обновлённые базы правил. Прежние файлы сохранены."
+
+msgid "The previous geodata was restored, but XrayWRT could not restart. Traffic may go direct. Restart XrayWRT and check the system log."
+msgstr "Прежние базы правил восстановлены, но XrayWRT не удалось перезапустить. Трафик может идти напрямую. Перезапустите XrayWRT и проверьте журнал."
+
+msgid "The new geodata could not be applied. The previous files were restored."
+msgstr "Не удалось применить новые базы правил. Прежние файлы восстановлены."
+
+msgid "Files used by your settings are checked before replacement unless another required file is still missing. Unused files cannot be checked now; they will be checked when settings start using them."
+msgstr "Файлы, которые используют ваши настройки, проверяются перед заменой. Исключение: другого нужного файла ещё нет. Неиспользуемые файлы сейчас проверить нельзя; их проверят, когда настройки начнут их использовать."
+
+msgid "Not enough router memory to check the geodata files. No files were replaced."
+msgstr "На роутере недостаточно памяти для проверки баз правил. Файлы не заменены."
+
+msgid "%s saved. %s is still missing; upload it to finish."
+msgstr "%s сохранён. Всё ещё не хватает файла %s; загрузите его, чтобы завершить настройку."
+
+msgid "The geodata update could not be finalized. Restart XrayWRT to finish recovery; this may restore the previous files. Do not delete backup files."
+msgstr "Не удалось завершить обновление баз правил. Перезапустите XrayWRT, чтобы завершить восстановление; при этом могут вернуться прежние файлы. Не удаляйте резервные копии."
+
+msgid "Show balancers"
+msgstr "Показать балансировщики"
+
+msgid "Hide balancers"
+msgstr "Скрыть балансировщики"
+
+msgid "Checking for a core update"
+msgstr "Проверка обновления ядра"
+
+msgid "Service"
+msgstr "Служба"
+
+msgid "The configuration has no balancers."
+msgstr "В конфигурации нет балансировщиков."
+
+msgid "Use \"Save configuration\" to apply editor changes immediately. \"Save & Apply\" does not save them."
+msgstr "«Сохранить конфигурацию» сразу применяет правки редактора. «Сохранить и применить» их не сохраняет."
+
+msgid "Auto-update lists"
+msgstr "Автообновление списков"
+
+msgid "As in the configuration: %s"
+msgstr "Как в конфигурации: %s"
+
+msgid "As in the configuration"
+msgstr "Как в конфигурации"
+
+msgid "Start on boot"
+msgstr "Запускать при загрузке роутера"
+
+msgid "The subscription selects server \"%s\", but it is missing from the configuration."
+msgstr "В подписке выбран сервер «%s», но его нет в конфигурации."
+
+msgid "Add my own rule database"
+msgstr "Добавить свою базу правил"
+
+msgid "For a .dat file the subscription does not supply. Add it by link (it then updates by itself) or upload it once from this computer."
+msgstr "Для файла .dat, которого нет в подписке. Добавьте его по ссылке (тогда он обновляется сам) или загрузите один раз с этого компьютера."
+
+msgid "By link"
+msgstr "По ссылке"
+
+msgid "From a file"
+msgstr "Из файла"
+
+msgid "Use a unique .dat name. If the subscription has a file with the same name, the subscription's file wins."
+msgstr "Используйте уникальное имя .dat. Если в подписке есть файл с таким же именем, используется файл подписки."
+
+msgid "Save links"
+msgstr "Сохранить ссылки"
+
+msgid "Name: as the configuration refers to it, for example geosite.dat; empty: the file name."
+msgstr "Имя — как в конфигурации, например geosite.dat; пусто — имя файла."
+
+msgid "Hide my own rule databases"
+msgstr "Скрыть свои базы правил"
+
+msgid "Adding a subscription"
+msgstr "Добавление подписки"
+
+msgid "Switching the subscription"
+msgstr "Переключение подписки"
+
+msgid "Deleting the subscription"
+msgstr "Удаление подписки"
+
+msgid "Switch to another subscription before deleting the active one."
+msgstr "Сначала переключитесь на другую подписку, а потом удалите эту."
+
+msgid "This subscription is not saved on the router."
+msgstr "Этой подписки нет на роутере."
+
+msgid "The subscription was switched, but its update failed. The saved configuration is in use."
+msgstr "Подписка переключена, но обновить её не удалось. Работает сохранённая конфигурация."
+
+msgid "Use"
+msgstr "Использовать"
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "Active"
+msgstr "Активна"
+
+msgid "Name"
+msgstr "Название"
+
+msgid "Status"
+msgstr "Состояние"
+
+msgid "Add subscription"
+msgstr "Добавить подписку"
+
+msgid "Enter the subscription link."
+msgstr "Введите ссылку на подписку."
+
+msgid "Add a subscription link, then press \"Use\" to switch to it."
+msgstr "Добавьте ссылку на подписку, затем нажмите «Использовать», чтобы перейти на неё."
+
+msgid "Subscription \"%s\" is now in use."
+msgstr "Подписка «%s» теперь используется."
+
+msgid "Subscription added. Press \"Use\" to switch to it."
+msgstr "Подписка добавлена. Нажмите «Использовать», чтобы перейти на неё."
+
+msgid "This subscription is already in the list."
+msgstr "Эта подписка уже есть в списке."
+
+msgid "Subscription deleted."
+msgstr "Подписка удалена."
+
+msgid "Delete the subscription?"
+msgstr "Удалить подписку?"
+
+msgid "\"%s\" is removed from the router with its saved configuration and rule databases."
+msgstr "«%s» будет удалена с роутера вместе с сохранённой конфигурацией и базами правил."
+
+msgid "Could not download the Xray core from GitHub. Check the router's internet connection, or install the core by hand: apk add --allow-untrusted xraywrt-core_*.apk. Details: %s"
+msgstr "Не удалось скачать ядро Xray с GitHub. Проверьте доступ роутера в интернет или установите ядро вручную: apk add --allow-untrusted xraywrt-core_*.apk. Подробности: %s"
+
+msgid "If the router cannot reach GitHub, copy xraywrt-core_*.apk from the XrayWRT release to the router and install it over SSH. The service restarts by itself."
+msgstr "Если роутер не может подключиться к GitHub, скопируйте xraywrt-core_*.apk из релиза XrayWRT на роутер и установите по SSH. Служба перезапустится сама."
+
+msgid "The subscription asks for a rule database update schedule \"%s\" that is invalid or more frequent than daily; %s is used instead."
+msgstr "Подписка задаёт расписание обновления баз правил «%s», которое некорректно или чаще раза в сутки; вместо него используется %s."
+
+msgid "The active subscription changed during the download. Nothing was changed; try again."
+msgstr "Во время загрузки сменилась активная подписка. Ничего не изменено; повторите."
+
+msgid "This link is already saved as another subscription."
+msgstr "Эта ссылка уже сохранена как другая подписка."
+
+msgid "Inbound %s was removed: its address and port are already used by another inbound."
+msgstr "Вход %s удалён: его адрес и порт уже заняты другим входом."
+
+msgid "Cannot finish an interrupted subscription switch. Free some space on the router (delete a subscription you do not use) and try again."
+msgstr "Не удалось завершить прерванное переключение подписки. Освободите место на роутере (удалите ненужную подписку) и повторите."
+
+msgid "XrayWRT did not stop. Try again."
+msgstr "XrayWRT не остановился. Повторите."
+
+msgid "My rules"
+msgstr "Мои правила"
+
+msgid "In the \"Only selected sites via VPN\" mode no sites are chosen: only the addresses of the subscription and of My rules go via VPN. Add sites to My rules on the What goes via VPN page."
+msgstr "В режиме «Только выбранные сайты через VPN» сайты не выбраны: через VPN идут только адреса из подписки и из «Моих правил». Добавьте сайты в «Мои правила» на странице «Что идёт через VPN»."
+
+msgid "Sites of My rules that go direct are ignored: the subscription has no site recognition."
+msgstr "Сайты из «Моих правил», которые идут напрямую, игнорируются: в подписке нет распознавания сайтов."
+
+msgid "Line %s of My rules (\"%s\") is not valid and was ignored."
+msgstr "Строка %s в «Моих правилах» («%s») неверна и пропущена."
+
+msgid "Line %s of My rules (%s) is not a site, an IP address, a subnet or a list link followed by one target. Write a site as its bare name, for example example.com."
+msgstr "Строка %s в «Моих правилах» (%s) — не сайт, не IP-адрес, не подсеть и не ссылка на список с одной целью после неё. Сайт пишите просто именем, например example.com."
+
+msgid "My rules has more than %s sites; the rest is ignored."
+msgstr "В «Моих правилах» больше %s сайтов; остальные игнорируются."
+
+msgid "Line %s of My rules (%s) has no target. Add a space and one of: %s."
+msgstr "В строке %s «Моих правил» (%s) нет цели. Добавьте пробел и одну из: %s."
+
+msgid "These targets of My rules are not in the configuration, so the lines that name them are skipped: %s."
+msgstr "Этих целей из «Моих правил» нет в конфигурации, поэтому строки с ними пропущены: %s."
+
+msgid "The rule for \"%s\" in My rules has more than %s addresses and was skipped. Use fewer or smaller lists."
+msgstr "Правило для «%s» в «Моих правилах» содержит больше %s адресов и пропущено. Используйте меньше или меньшие списки."
+
+msgid "My rules has more than %s sites."
+msgstr "В «Моих правилах» больше %s сайтов."
+
+msgid "Line %s of My rules (%s): there is no target \"%s\". Use one of: %s."
+msgstr "Строка %s в «Моих правилах» (%s): нет цели «%s». Используйте одну из: %s."
+
+msgid "Choose which sites, addresses and devices go through the VPN and which go directly. These lists belong to the current subscription. Save & Apply applies the changes."
+msgstr "Выберите, какие сайты, адреса и устройства идут через VPN, а какие напрямую. Эти списки относятся к текущей подписке. «Сохранить и применить» применяет изменения."
+
+msgid "One rule per line: a site, an IP address or subnet, or a link to a list of addresses, then a space and where it goes. The first line that matches wins. Write a site as its name, not its IP address."
+msgstr "Одно правило в строке: сайт, IP-адрес или подсеть либо ссылка на список адресов, затем пробел и куда это направить. Срабатывает первая подходящая строка. Сайт указывайте именем, а не IP."
+
+msgid "straight to the internet"
+msgstr "сразу в интернет"
+
+msgid "the rules of your subscription decide"
+msgstr "решают правила вашей подписки"
+
+msgid "or one of your servers and balancers:"
+msgstr "или один из ваших серверов и балансировщиков:"
+
+msgid "Show the targets"
+msgstr "Показать цели"
+
+msgid "Hide the targets"
+msgstr "Скрыть цели"
+
+msgid "The tags %s of the configuration cannot be used here: \"direct\" means straight to the internet and \"core\" means that the rules of the subscription decide."
+msgstr "Теги %s из конфигурации здесь использовать нельзя: «direct» означает «сразу в интернет», а «core» — «решают правила подписки»."
+
+msgid "Site recognition is not enabled in the configuration, so lines with a site that goes direct are not used."
+msgstr "В конфигурации не включено распознавание сайтов, поэтому строки с сайтом, который идёт напрямую, не используются."
+
+msgid "One rule per line, for example:"
+msgstr "Одно правило в строке, например:"
+
+msgid "a site and its subdomains, straight to the internet"
+msgstr "сайт и его поддомены, сразу в интернет"
+
+msgid "a category from geosite.dat, the rules of the subscription decide"
+msgstr "категория из geosite.dat, решают правила подписки"
+
+msgid "only this exact name, through a server or balancer of your configuration"
+msgstr "только это имя, через сервер или балансировщик вашей конфигурации"
+
+msgid "an address or subnet"
+msgstr "адрес или подсеть"
+
+msgid "a link to a list of addresses and subnets"
+msgstr "ссылка на список адресов и подсетей"
+
+msgid "Other site forms: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Comments start with #. Saving is refused until every line is valid."
+msgstr "Другие виды сайтов: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Комментарии начинаются с #. Пока есть неверная строка, сохранить нельзя."
+
+msgid "No suitable outbounds. Add a tagged VPN outbound to the configuration."
+msgstr "Нет подходящих outbound. Добавьте в конфигурацию outbound для VPN с тегом."
+
+msgid "Choose an outbound"
+msgstr "Выберите outbound"
+
+msgid "%s (not available)"
+msgstr "%s (недоступен)"
+
+msgid "Enter a DNS server IP[:port] for forwarding through the VPN."
+msgstr "Укажите IP[:порт] DNS-сервера для пересылки через VPN."
+
+msgid "Enter a valid IP address with an optional port (1–65535)."
+msgstr "Укажите корректный IP-адрес и, при необходимости, порт (1–65535)."
+
+msgid "Forwarding of other DNS query types was turned off because its outbound became unavailable. Choose an outbound in Advanced DNS to re-enable it, or leave forwarding off."
+msgstr "Пересылка остальных типов DNS-запросов отключена: выбранный outbound стал недоступен. Чтобы включить её снова, выберите outbound в «Дополнительно → DNS» или оставьте пересылку выключенной."
+
+msgid "Forwarding of other DNS query types was turned off because outbound \"%s\" became unavailable. Choose an outbound to re-enable it, or leave forwarding off."
+msgstr "Пересылка прочих DNS-запросов выключена: outbound «%s» недоступен. Выберите другой outbound или оставьте пересылку выключенной."
+
+msgid "DNS forwarding protection could not be saved or restored. Free storage and review Advanced DNS before trying again."
+msgstr "Не удалось сохранить или восстановить защитное отключение пересылки DNS. Освободите место и проверьте настройки в «Дополнительно → DNS» перед повторной попыткой."

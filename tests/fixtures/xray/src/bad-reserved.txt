@@ -1,0 +1,1 @@
+{"outbounds": [{"tag": "xraywrt-x", "protocol": "freedom"}]}

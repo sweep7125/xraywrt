@@ -1,0 +1,6 @@
+# golden whitelist
+geosite:youtube core
+example.com core
+full:api.example.org core
+keyword:tracker core
+regexp:^cdn[0-9]+\.example\.net$ core

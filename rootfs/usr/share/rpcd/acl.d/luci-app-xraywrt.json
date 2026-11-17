@@ -1,0 +1,30 @@
+{
+	"luci-app-xraywrt": {
+		"description": "Grant access to XrayWRT procedures",
+		"read": {
+			"cgi-io": [ "exec" ],
+			"file": {
+				"/usr/bin/xraywrt-read": [ "exec" ]
+			},
+			"ubus": {
+				"file": [ "exec" ],
+				"luci": [ "getInitList" ],
+				"luci-rpc": [ "getDHCPLeases" ]
+			},
+			"uci": [ "xraywrt" ]
+		},
+		"write": {
+			"file": {
+				"/usr/bin/xraywrt": [ "exec" ],
+				"/etc/init.d/xraywrt": [ "exec" ],
+				"/tmp/xraywrt-config.*": [ "write" ],
+				"/tmp/xraywrt-geodata.*": [ "write" ],
+				"/tmp/xraywrt-policy-list.*": [ "write" ]
+			},
+			"ubus": {
+				"file": [ "exec" ]
+			},
+			"uci": [ "xraywrt" ]
+		}
+	}
+}

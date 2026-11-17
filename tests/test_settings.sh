@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+source "$(dirname "$0")/testlib.sh"
+
+tmpdir="$(make_temp_dir)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+setup_fake_uci "$tmpdir"
+load_modules constants.sh helpers.sh validate.sh settings.sh dns.sh xray-config.sh lists.sh
+setup_runtime_paths "$tmpdir"
+
+
+# polish: long hex mark
+(
+ set -e
+ assert_true 'five hex digits accepted' is_valid_uint32_mark 0x1BD00
+ assert_true 'eight hex digits accepted' is_valid_uint32_mark 0x12345678
+ assert_false 'nine significant hex digits rejected' is_valid_uint32_mark 0x123456789
+ assert_false 'long hex mark with leading zeros rejected' is_valid_uint32_mark 0x000000001
+)
+pass 'long hex mark'
+
+# polish: settings_load resets flag
+check_settings_load_flag() {
+ set -e
+ local SETTINGS_LOADED
+ fake_uci_set xraywrt.settings.lists_interval invalid
+ SETTINGS_LOADED=1
+ settings_rc=0
+ settings_load 2>"$tmpdir/reset-flag.err" || settings_rc=$?
+ assert_eq 1 "$settings_rc" 'invalid lists_interval fails load'
+ assert_eq 0 "$SETTINGS_LOADED" 'settings_load resets flag'
+}
+(check_settings_load_flag)
+fake_uci_reset
+pass 'settings_load resets flag'
+
+# Run numeric regressions in ash, where leading zeros otherwise mean octal.
+ash -c '
+ . "$XRAYWRT_LIB_DIR/validate.sh"
+ for pair in 0:0 000:0 08:8 0113920:113920 24:24; do
+  actual="$(uint_norm "${pair%:*}")" || exit 1
+  [ "$actual" = "${pair#*:}" ] || exit 1
+ done
+' || fail "uint_norm strips leading zeros in ash"
+pass "uint_norm decimal normalization"
+
+fake_uci_set xraywrt.settings.lists_interval 08
+fake_uci_set xraywrt.settings.netbird_mark 0113920
+fake_uci_set xraywrt.settings.cron_minute 07
+ash -c '
+ for module in constants helpers validate settings xray-config lists; do
+  . "$XRAYWRT_LIB_DIR/$module.sh"
+ done
+ PROFILE_FILE="$1/profile"
+ XRAY_CONFIG="$1/source.json"
+ settings_load || exit 1
+ [ "$LISTS_INTERVAL:$NETBIRD_MARK:$CRON_MINUTE" = "8:113920:7" ]
+' ash "$tmpdir" || fail "leading zeros in UCI load as decimal in ash"
+settings_load || fail "leading-zero settings must load"
+assert_eq '8:113920:7' "$LISTS_INTERVAL:$NETBIRD_MARK:$CRON_MINUTE" "normalized UCI settings"
+assert_eq 1 "$SETTINGS_LOADED" "successful load sets guard"
+fake_uci_set xraywrt.settings.lists_interval 24
+settings_require
+assert_eq 8 "$LISTS_INTERVAL" "require preserves loaded settings"
+settings_load
+assert_eq 24 "$LISTS_INTERVAL" "explicit load refreshes settings"
+fake_uci_reset
+unset SETTINGS_LOADED
+settings_require
+assert_eq 24 "$LISTS_INTERVAL" "require loads when guard is absent"
+pass "settings normalized and lazy loaded without suppressing refresh"
+
+# The lost-outbound latch belongs to UCI, never an inherited or stale value.
+for saved in '' 'VPN 🇷🇺 = primary'; do
+ fake_uci_reset
+ [ -z "$saved" ] || fake_uci_set xraywrt.settings.dns_raw_lost "$saved"
+ DNS_RAW_LOST=hostile ash -eu -c '
+  for module in constants helpers validate settings xray-config; do
+   . "$XRAYWRT_LIB_DIR/$module.sh"
+  done
+  PROFILE_FILE="$1/profile"
+  XRAY_CONFIG="$1/source.json"
+  PROVIDER_OVERRIDES=""
+  settings_generator_load
+  [ "$DNS_RAW_LOST" = "$2" ]
+  DNS_RAW_LOST=stale
+  settings_load
+  [ "$DNS_RAW_LOST" = "$2" ]
+ ' ash "$tmpdir" "$saved" || fail 'DNS_RAW_LOST must be initialized from UCI'
+done
+fake_uci_reset
+pass 'generator and settings loads replace inherited and stale DNS_RAW_LOST from UCI'
+
+settings_load || fail "empty UCI must load"
+assert_eq "proxy-first" "$POLICY_MODE" "default policy mode"
+assert_eq redir-host "$DNS_MODE" "no config defaults to redir-host"
+assert_eq "br-lan" "$SOURCE_INTERFACES" "default source interface"
+assert_eq "1:1:0:1:1" "$DNS_HIJACK:$DISABLE_QUIC:$NETBIRD_PROXY:$BYPASS_NTP:$BYPASS_SUBSCRIPTION_DNS" "default toggles"
+assert_eq "0:24" "$SUBSCRIPTION_INTERVAL:$LISTS_INTERVAL" "default intervals (no provider period)"
+assert_eq "113920" "$NETBIRD_MARK" "default NetBird mark"
+assert_eq 0 "$DIRECT_LISTENER" "no config has no direct listener"
+assert_eq warning "$CORE_LOG_LEVEL" "default Xray log level"
+assert_eq 'proxy-first:0:0::0' "$UCI_MODE:$MODE_OVERRIDE:$DNS_FORWARD_OVERRIDE:$PROFILE_NAME:$DNS_FORWARD_OTHER_TYPES" "default generator inputs"
+assert_eq '0 5 * * *' "$GEODATA_CRON" 'default geodata cron'
+assert_eq '[]' "$GEODATA_ASSETS_JSON" 'default user geodata list'
+fake_uci_set xraywrt.settings.geodata_asset 'own.dat=https://own.example/a?x=y'
+fake_uci_set xraywrt.settings.geodata_cron '15 6 * * 1-5'
+settings_load
+assert_eq '["own.dat=https://own.example/a?x=y"]' "$GEODATA_ASSETS_JSON" 'user asset parameter'
+assert_eq '15 6 * * 1-5' "$GEODATA_CRON" 'custom schedule'
+params="$(xray_params_json)"
+assert_eq '["own.dat=https://own.example/a?x=y"]' "$(jq -c .geodata_asset <<<"$params")" 'wrapper forwards user assets'
+assert_eq true "$(jq -c .ipv6 <<<"$params")" 'wrapper reports IPv6 routing'
+assert_eq false "$(jq -c .from_subscription <<<"$params")" 'no subscription: hand-written config'
+SUBSCRIPTION_URL=https://sub.example/x
+assert_eq true "$(xray_params_json | jq -c .from_subscription)" 'a saved subscription marks the config as provider-supplied'
+SUBSCRIPTION_URL=
+printf '1\n' >"$ROUTE_PROC_ROOT/sys/net/ipv6/conf/all/disable_ipv6"
+assert_eq false "$(xray_params_json | jq -c .ipv6)" 'wrapper reports IPv6 routing off'
+printf '0\n' >"$ROUTE_PROC_ROOT/sys/net/ipv6/conf/all/disable_ipv6"
+fake_uci_reset
+settings_load
+pass "settings defaults"
+
+expect_invalid() {
+	local option="$1" value="$2"
+
+	fake_uci_reset
+	fake_uci_set "xraywrt.settings.$option" "$value"
+	if settings_load 2>/dev/null; then
+		fail "$option=$value must be rejected"
+	fi
+}
+
+expect_invalid source_network_interfaces 'br;lan'
+expect_invalid netbird_mark 0x04000000
+expect_invalid netbird_mark 0x0401BD00
+expect_invalid netbird_mark 0x08000000
+expect_invalid netbird_mark 0x1BD01
+expect_invalid lists_interval abc
+expect_invalid core_log_level trace
+expect_invalid mode auto
+expect_invalid dns_raw_upstream 'dns.example'
+expect_invalid dns_raw_via $'proxy\tx'
+(
+ # Multi-line values cannot be represented by the line-based fake UCI database.
+ settings_uci_get() { if [ "$1" = dns_raw_via ]; then printf 'proxy\nx'; else printf '%s' "${2:-}"; fi; }
+ settings_generator_load 2>/dev/null && fail 'newline in outbound tag must be rejected'
+ :
+)
+for tag in 'proxy;x' 'VPN 🇷🇺 = primary' 'a b'; do
+ fake_uci_reset
+ fake_uci_set xraywrt.settings.dns_raw_via "$tag"
+ settings_generator_load
+ assert_eq "$tag" "$DNS_RAW_VIA" 'preserve source tag characters'
+done
+fake_uci_reset
+set_active_subscription 'ftp://x'
+settings_load 2>/dev/null && fail 'the active subscription link must be http(s)'
+for level in debug info warning error none; do
+ fake_uci_reset
+ fake_uci_set xraywrt.settings.core_log_level "$level"
+ settings_load
+ assert_eq "$level" "$CORE_LOG_LEVEL" "allowed log level"
+done
+pass "settings rejects invalid values"
+
+fake_uci_reset
+fake_uci_set xraywrt.settings.mode direct-first
+fake_uci_set xraywrt.settings.provider_override 'mode dns_forward_other_types'
+fake_uci_set xraywrt.settings.source_network_interfaces 'br-lan wg0'
+fake_uci_set xraywrt.settings.bypass_ntp 0
+settings_load || fail "valid settings must load"
+assert_eq "direct-first:1:1|br-lan wg0|0" "$UCI_MODE:$MODE_OVERRIDE:$DNS_FORWARD_OVERRIDE|$SOURCE_INTERFACES|$BYPASS_NTP" "explicit values"
+pass "settings explicit values"
+
+fake_uci_reset
+settings_ensure_generated || fail "generate must succeed"
+minute="$(uci_get cron_minute)"
+if ! [[ "$minute" =~ ^[0-9]+$ ]] || (( minute > 59 )); then fail "minute out of range: $minute"; fi
+assert_eq "" "$(ls -A "$PKG_PERSIST_DIR" 2>/dev/null)" "nothing generated in the persistent directory"
+settings_ensure_generated
+assert_eq "$minute" "$(uci_get cron_minute)" "generated minute stays stable"
+pass "generated cron minute stays stable"
+
+assert_true "compressed IPv6 with 7 groups" is_ipv6 1:2:3:4:5:6::7
+assert_true "IPv6 loopback" is_ipv6 ::1
+assert_false "too many groups" is_ipv6 1:2:3:4:5:6:7:8:9
+pass "ipv6 validator"
+
+# G: a failed write must not truncate root's crontab.
+CRON_FILE="$tmpdir/crontab"
+printf '0 3 * * * /root/backup.sh\n' >"$CRON_FILE"
+grep() { return 2; }
+cron_sync "# m" 1 "17 * * * * x" 2>/dev/null || true
+unset -f grep
+assert_file_contains "$CRON_FILE" "/root/backup.sh" "crontab kept on write error"
+pass "cron sync safe on errors"
+
+# B6: cron_sync compares in /tmp and touches target directory only when changed.
+cron_dir="$tmpdir/crontabs"
+mkdir -p "$cron_dir" /etc/init.d
+CRON_FILE="$cron_dir/root"
+cron_log="$tmpdir/cron.log"
+printf '#!/bin/sh\necho "$*" >>"%s"\n' "$cron_log" >/etc/init.d/cron
+chmod +x /etc/init.d/cron
+printf '0 3 * * * /root/backup.sh\n17 * * * * /usr/bin/xraywrt auto-update # xraywrt\n' >"$CRON_FILE"
+# Set past mtime so any write changes it
+touch -d '2026-01-01 00:00:00' "$cron_dir" "$CRON_FILE"
+dir_mtime_before="$(stat -c %Y "$cron_dir")"
+file_inode_before="$(stat -c %i "$CRON_FILE")"
+file_mtime_before="$(stat -c %Y "$CRON_FILE")"
+
+# Unchanged sync must not touch cron_dir or CRON_FILE, and must not reload cron.
+cron_sync "# xraywrt" 1 "17 * * * * /usr/bin/xraywrt auto-update" || fail "cron_sync unchanged failed"
+assert_eq "$dir_mtime_before" "$(stat -c %Y "$cron_dir")" "crontab dir mtime unchanged"
+assert_eq "$file_inode_before" "$(stat -c %i "$CRON_FILE")" "crontab file inode unchanged"
+assert_eq "$file_mtime_before" "$(stat -c %Y "$CRON_FILE")" "crontab file mtime unchanged"
+assert_eq "root" "$(ls "$cron_dir")" "no staging leftovers in crontab dir on unchanged"
+assert_false "cron not reloaded when unchanged" test -s "$cron_log"
+
+# Changed sync replaces atomically, preserves other lines, and reloads cron.
+cron_sync "# xraywrt" 1 "25 * * * * /usr/bin/xraywrt auto-update" || fail "cron_sync changed failed"
+assert_file_contains "$CRON_FILE" "/root/backup.sh" "other users lines preserved"
+assert_file_contains "$CRON_FILE" "25 * * * * /usr/bin/xraywrt auto-update # xraywrt" "updated line present"
+assert_file_not_contains "$CRON_FILE" "17 * * * *" "old line removed"
+assert_eq "root" "$(ls "$cron_dir")" "no staging leftovers in crontab dir after change"
+assert_true "cron reloaded on change" grep -q "restart" "$cron_log"
+rm -f /etc/init.d/cron "$cron_log"
+pass "cron sync atomic staging and no-op on unchanged"
+
+# Owner metadata is diagnostic only; stale or reused pids cannot block work.
+RUNTIME_LOCK_FILE="$tmpdir/runtime.flock"
+echo "$$" >"$RUNTIME_LOCK_FILE.owner"
+RUNTIME_LOCK_TIMEOUT=0 with_lock true || fail "unrelated live owner pid must not block an unlocked flock"
+assert_true "persistent flock file exists" test -f "$RUNTIME_LOCK_FILE"
+assert_false "lock file is not a symlink" test -L "$RUNTIME_LOCK_FILE"
+pass "stale owner metadata cannot block the runtime lock"
+
+fake_uci_reset
+printf 'profile-schema 1\nfake-enabled 1\nmode direct-first\nfake-domains 2\nset disable_quic 0\nset dns_hijack 0\n' >"$PROFILE_FILE"
+fake_uci_set xraywrt.settings.disable_quic 1
+fake_uci_set xraywrt.settings.dns_hijack 1
+fake_uci_set xraywrt.settings.mode proxy-first
+settings_load
+assert_eq '0:0:direct-first' "$DISABLE_QUIC:$DNS_HIJACK:$POLICY_MODE" "provider wins and the profile mode is effective"
+assert_eq 'fake-ip:1' "$DNS_MODE:$DIRECT_LISTENER" "fakedns domains enable fake-IP and the direct listener"
+assert_true "both provider keys exposed" test "${PROVIDER_KEYS#*disable_quic}" != "$PROVIDER_KEYS"
+fake_uci_set xraywrt.settings.provider_override 'disable_quic bypass_ntp'
+fake_uci_set xraywrt.settings.bypass_ntp 0
+settings_load
+assert_eq '1:0:0' "$DISABLE_QUIC:$DNS_HIJACK:$BYPASS_NTP" "per-key and stale overrides"
+sed -i '/set disable_quic/d' "$PROFILE_FILE"
+settings_load
+assert_eq 1 "$DISABLE_QUIC" "override survives key drop"
+printf 'set disable_quic 0\n' >>"$PROFILE_FILE"
+settings_load
+assert_eq '1:0' "$DISABLE_QUIC:$DNS_HIJACK" "override survives re-add without affecting other key"
+for auto in missing 1 0; do
+ fake_uci_set xraywrt.settings.subscription_auto_update "$auto"
+ [ "$auto" != missing ] || uci delete xraywrt.settings.subscription_auto_update
+ for header in 12 08 000 0 9999 abc missing; do
+  printf '{"header_interval":"%s"}\n' "$header" >"$tmpdir/meta"
+  SUBSCRIPTION_META_FILE="$tmpdir/meta"
+  [ "$header" != missing ] || echo '{}' >"$SUBSCRIPTION_META_FILE"
+  expected=0
+  if [ "$auto" != 0 ]; then
+   case "$header" in 12) expected=12 ;; 08) expected=8 ;; esac
+  fi
+  assert_eq "$expected" "$(settings_subscription_interval)" "auto=$auto header=$header"
+ done
+done
+pass "provider precedence, persistent per-key overrides, sources and provider schedule"
+
+fake_uci_reset
+fake_uci_set xraywrt.settings.lists_interval 0
+settings_load
+assert_eq 0 "$LISTS_INTERVAL" 'existing lists interval 0 preserved'
+assert_file_contains "$ROOT_DIR/rootfs/etc/config/xraywrt" "option lists_interval '24'" 'shipped default interval'
+pass 'default interval and existing disabled interval'
+
+# Private runtime directories must be safe before the first service start.
+(
+ umask 022
+ PKG_TMP_DIR="$tmpdir/before-layout/tmp"
+ PKG_STATE_DIR="$tmpdir/before-layout/run"
+ for private in "$PKG_TMP_DIR/nested" "$PKG_STATE_DIR/nested"; do
+  ensure_dir "$private"
+  assert_eq 700 "$(stat -c %a "$private")" 'private subdirectory mode without runtime_dirs_init'
+  assert_eq 700 "$(stat -c %a "${private%/*}")" 'private root mode without runtime_dirs_init'
+ done
+ ensure_dir "$tmpdir/public"
+ assert_eq 755 "$(stat -c %a "$tmpdir/public")" 'unrelated directories keep caller umask'
+ assert_eq 0022 "$(umask)" 'ensure_dir does not change caller umask'
+)
+pass 'private runtime directories created mode 700 before runtime_dirs_init'
+
+# Spec 4.4/13: no core auto-update option.
+fake_uci_reset
+fake_uci_set xraywrt.settings.core_auto_update 1
+unset CORE_AUTO_UPDATE
+settings_load
+assert_eq unset "${CORE_AUTO_UPDATE-unset}" 'settings_load reads no core_auto_update'
+assert_false 'shipped config has no core_auto_update' grep -q core_auto_update "$ROOT_DIR/rootfs/etc/config/xraywrt"
+pass 'no core_auto_update setting'
+
+# Spec 13: shipped UCI defaults.
+for opt in "mode 'proxy-first'" "dns_forward_other_types '0'" "core_log_level 'warning'"; do
+	assert_file_contains "$ROOT_DIR/rootfs/etc/config/xraywrt" "option $opt" "default $opt"
+done
+assert_false 'the old list source options are gone' grep -E '_list_source|fake_domains_source' "$ROOT_DIR/rootfs/etc/config/xraywrt"
+assert_false 'no public resolver defaults' grep -E 'dns_(raw_)?upstream|1\.1\.1\.1|8\.8\.8\.8' "$ROOT_DIR/rootfs/etc/config/xraywrt"
+pass 'shipped UCI defaults'
+
+dns_wan_servers() { :; }
+# core_log_level is a regular provider-set option; generator fallback stays UCI.
+fake_uci_reset
+fake_uci_set xraywrt.settings.core_log_level error
+printf 'profile-schema 1\nfake-enabled 0\nset core_log_level debug\n' >"$PROFILE_FILE"
+settings_load
+assert_eq debug "$CORE_LOG_LEVEL" 'effective log level from provider profile'
+assert_eq error "$(xray_params_json | jq -r .log_level)" 'generator gets UCI fallback, not cached provider'
+assert_eq false "$(xray_params_json | jq -r .log_level_override)" 'provider log level not overridden'
+fake_uci_set xraywrt.settings.provider_override core_log_level
+settings_load
+assert_eq error "$CORE_LOG_LEVEL" 'override uses UCI log level'
+assert_eq true "$(xray_params_json | jq -r .log_level_override)" 'override passed to generator'
+: >"$PROFILE_FILE"
+settings_load
+assert_eq error "$CORE_LOG_LEVEL" 'absent provider uses UCI log level'
+pass 'core log level provider value and override'

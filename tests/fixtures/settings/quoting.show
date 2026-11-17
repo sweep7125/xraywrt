@@ -1,0 +1,6 @@
+xraywrt.settings='settings'
+xraywrt.settings.provider_override='odd'\''s value' 'literal"quote' '$(false)' 'back\slash'
+xraywrt.settings.subscription='squote'
+xraywrt.squote='subscription'
+xraywrt.squote.url='https://example.com/it'\''s?x=$(false)&y=back\slash'
+xraywrt.settings.cron_minute='999'

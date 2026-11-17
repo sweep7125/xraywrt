@@ -1,0 +1,65 @@
+{
+	"admin/services/xraywrt": {
+		"title": "XrayWRT",
+		"action": {
+			"type": "alias",
+			"path": "admin/services/xraywrt/overview"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-xraywrt"
+			],
+			"uci": {
+				"xraywrt": true
+			}
+		}
+	},
+	"admin/services/xraywrt/overview": {
+		"title": "Home",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "xraywrt/overview"
+		}
+	},
+	"admin/services/xraywrt/subscription": {
+		"title": "Subscription",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "xraywrt/subscription"
+		}
+	},
+	"admin/services/xraywrt/traffic": {
+		"title": "What goes via VPN",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "xraywrt/traffic"
+		}
+	},
+	"admin/services/xraywrt/updates": {
+		"title": "Updates",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "xraywrt/updates"
+		}
+	},
+	"admin/services/xraywrt/help": {
+		"title": "Help",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "xraywrt/help"
+		}
+	},
+	"admin/services/xraywrt/advanced": {
+		"title": "Advanced",
+		"order": 60,
+		"action": {
+			"type": "view",
+			"path": "xraywrt/advanced"
+		}
+	}
+}

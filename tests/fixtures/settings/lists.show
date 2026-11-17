@@ -1,0 +1,4 @@
+xraywrt.settings='settings'
+xraywrt.settings.source_network_interfaces='br-lan' 'eth1.2' 'wg0'
+xraywrt.settings.provider_override='disable_quic' 'dns_hijack' 'bypass_ntp'
+xraywrt.settings.lists_interval='000'

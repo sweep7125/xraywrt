@@ -1,0 +1,6 @@
++ /opt/xraywrt/config.json
++ /opt/xraywrt/lst/always_proxy_dst.txt
++ /opt/xraywrt/lst/always_proxy_src.txt
++ /opt/xraywrt/lst/direct_dst.txt
++ /opt/xraywrt/lst/direct_src.txt
++ /opt/xraywrt/lst/rules.txt

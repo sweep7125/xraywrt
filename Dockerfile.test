@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+FROM alpine:3.24
+
+LABEL maintainer="XrayWRT Maintainers"
+LABEL description="Native test runner container for XrayWRT"
+
+# Install test tools natively for host architecture (no QEMU emulation required)
+RUN apk add --no-cache \
+    bash \
+    coreutils \
+    gawk \
+    grep \
+    jq \
+    ucode \
+    make \
+    nodejs \
+    sed \
+    shellcheck
+
+# Pinned Go Xray core and geodata for tests that run the real core
+# (`run -test`). TARGETARCH is unset by the classic builder: uname -m then. Test environment only: the product has no default geodata
+# sources and no bundled core.
+ARG TARGETARCH
+ARG XRAY_TEST_TAG=v26.11.1-1424
+ARG GEOIP_TAG=202610050438
+ARG GEOSITE_TAG=20261101074624
+RUN set -eu; \
+    case "${TARGETARCH:-$(uname -m)}" in \
+    amd64 | x86_64) asset=Xray-linux-64; sha=8f7a001bc40c784f13608fcf06ba50605adbe0984066949be2db37b1c3166e9b ;; \
+    arm64 | aarch64) asset=Xray-linux-arm64-v8a; sha=9f26c90d95dc336cde2308235380bf72ac57fca3f95d929e147723b98f53b0dd ;; \
+    *) echo "unsupported architecture ${TARGETARCH:-$(uname -m)}" >&2; exit 1 ;; \
+    esac; \
+    wget -q -O /usr/local/bin/xray-test "https://github.com/Jolymmiles/Xray-core/releases/download/$XRAY_TEST_TAG/$asset"; \
+    echo "$sha  /usr/local/bin/xray-test" | sha256sum -c -; \
+    chmod 755 /usr/local/bin/xray-test; \
+    mkdir -p /usr/local/share/xray-test; \
+    wget -q -O /usr/local/share/xray-test/geoip.dat "https://github.com/v2fly/geoip/releases/download/$GEOIP_TAG/geoip.dat"; \
+    wget -q -O /usr/local/share/xray-test/geosite.dat "https://github.com/v2fly/domain-list-community/releases/download/$GEOSITE_TAG/dlc.dat"; \
+    printf '%s  %s\n' \
+        4ff4b2ec242a9e87b296ba27ddb85f8311e8d3e071eaebac5be9231c60e408dd /usr/local/share/xray-test/geoip.dat \
+        64f213e84d75f7fddf43b9a75f5afcce09f07124cce592e458cbbfa045906aa8 /usr/local/share/xray-test/geosite.dat | sha256sum -c -
+
+WORKDIR /workspace
+
+CMD ["/bin/bash", "tests/run.sh"]

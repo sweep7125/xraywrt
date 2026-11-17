@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/testlib.sh"
+tmpdir="$(make_temp_dir)"
+trap 'rm -rf "$tmpdir"' EXIT
+mkdir -p "$tmpdir/bin"
+cat >"$tmpdir/bin/uci" <<'UCI'
+#!/bin/sh
+[ "$1" != -q ] || shift
+[ -z "${UCI_CALLS:-}" ] || printf '%s\n' "$*" >>"$UCI_CALLS"
+case "$1" in
+show) cat "$UCI_FIXTURE.show" ;;
+get) awk -v key="$2=" 'index($0,key)==1 {print substr($0,length(key)+1); found=1; exit} END {exit !found}' "$UCI_FIXTURE.get" ;;
+*) exit 1 ;;
+esac
+UCI
+chmod +x "$tmpdir/bin/uci"
+export PATH="$tmpdir/bin:$PATH" UCI_CALLS="$tmpdir/uci-calls"
+cat >"$tmpdir/snapshot.sh" <<'ASH'
+#!/bin/ash
+for module in constants helpers validate settings; do . "$XRAYWRT_LIB_DIR/$module.sh"; done
+profile_ensure() { return 0; }
+profile_get() { case "$1" in mode) echo direct-first ;; fake-domains) echo 2 ;; fake-enabled) echo 1 ;; 'set disable_quic') echo 0 ;; 'set dns_hijack') echo 0 ;; esac; }
+profile_entries() { printf 'disable_quic 0\ndns_hijack 0\n'; }
+SUBSCRIPTION_META_FILE="$SNAPSHOT_TMP/meta"
+PKG_STATE_DIR="$SNAPSHOT_TMP/state"
+CONFIG_INVALID_FILE="$PKG_STATE_DIR/config.invalid"
+settings_load || exit 1
+for key in POLICY_MODE DNS_MODE DIRECT_LISTENER PROVIDER_KEYS PROVIDER_OVERRIDES SOURCE_INTERFACES DNS_HIJACK DISABLE_QUIC NETBIRD_PROXY BYPASS_NTP BYPASS_SUBSCRIPTION_DNS BLOCK_CLIENT_IPV6 NETBIRD_MARK NETBIRD_INTERFACE SUBSCRIPTION_URL SUBSCRIPTION_INTERVAL LISTS_INTERVAL CRON_MINUTE SETTINGS_LOADED; do
+ eval 'value="${'"$key"'}"'
+ printf '%s=%s\n' "$key" "$value"
+done
+ASH
+export SNAPSHOT_TMP="$tmpdir"
+printf '{"header_interval":12}\n' >"$tmpdir/meta"
+mkdir -p "$tmpdir/bb"
+ln -s "$(command -v busybox)" "$tmpdir/bb/awk"
+for awk_impl in default busybox; do
+path="$PATH"
+[ "$awk_impl" = default ] || path="$tmpdir/bb:$PATH"
+for name in defaults full lists quoting; do
+ export UCI_FIXTURE="$ROOT_DIR/tests/fixtures/settings/$name"
+ : >"$UCI_CALLS"
+ PATH="$path" ash "$tmpdir/snapshot.sh" >"$tmpdir/$name.actual"
+ if [ "${CAPTURE_SETTINGS_SNAPSHOTS:-0}" = 1 ]; then
+  cp "$tmpdir/$name.actual" "$UCI_FIXTURE.snapshot"
+ else
+  assert_true "$awk_impl awk: $name settings identical to pre-X6 snapshot" cmp -s "$UCI_FIXTURE.snapshot" "$tmpdir/$name.actual"
+  assert_eq 1 "$(grep -c '^show xraywrt$' "$UCI_CALLS" || true)" "$name one UCI show pass"
+  assert_eq 0 "$(grep -c '^get xraywrt' "$UCI_CALLS" || true)" "$name no per-option UCI get"
+ fi
+done
+# Absent UCI keys must not fall through to inherited snapshot variables.
+for poisoned_key in subscription netbird_mark both; do
+ poison=()
+ [ "$poisoned_key" = subscription ] || poison+=(settings_uci_netbird_mark=bad)
+ [ "$poisoned_key" = netbird_mark ] || poison+=(settings_uci_subscription=evil)
+ if ! env "${poison[@]}" UCI_FIXTURE="$ROOT_DIR/tests/fixtures/settings/defaults" PATH="$path" \
+  ash "$tmpdir/snapshot.sh" >"$tmpdir/poison.actual"; then
+  fail "$awk_impl awk: inherited $poisoned_key snapshot must not invalidate settings"
+ fi
+ assert_true "$awk_impl awk: inherited $poisoned_key snapshot ignored" cmp -s "$ROOT_DIR/tests/fixtures/settings/defaults.snapshot" "$tmpdir/poison.actual"
+ assert_false "$awk_impl awk: inherited $poisoned_key creates no invalid marker" test -e "$tmpdir/state/config.invalid"
+done
+# Values are eval'd: backticks, $() and a multi-line value must stay literal.
+printf '%s\n' "xraywrt.settings='settings'" \
+ "xraywrt.settings.provider_override='\`touch $tmpdir/pwned1\`\$(touch $tmpdir/pwned2)' 'line1" "touch $tmpdir/pwned3'" >"$tmpdir/inject.show"
+: >"$tmpdir/inject.get"
+UCI_FIXTURE="$tmpdir/inject" PATH="$path" ash "$tmpdir/snapshot.sh" >"$tmpdir/inject.actual" || true
+assert_false "$awk_impl awk: injected settings never execute" test -e "$tmpdir/pwned1" -o -e "$tmpdir/pwned2" -o -e "$tmpdir/pwned3"
+assert_true "$awk_impl awk: backtick value stays literal" grep -qF "PROVIDER_OVERRIDES=\`touch $tmpdir/pwned1\`\$(touch $tmpdir/pwned2)" "$tmpdir/inject.actual"
+done
+pass 'settings_load defaults, full, lists and quoting snapshots in ash (default and BusyBox awk)'
+
+# Unlike word lists, user assets must retain entry boundaries for validation.
+cat >"$tmpdir/geodata.show" <<'UCI'
+xraywrt.settings='settings'
+xraywrt.settings.geodata_asset='one.dat=https://x/one?x=y' 'two.dat=https://x/two with spaces' 'three.dat=https://x/it'\''s.dat'
+UCI
+: >"$tmpdir/geodata.get"
+for awk_impl in default busybox; do
+ path="$PATH"
+ [ "$awk_impl" = default ] || path="$tmpdir/bb:$PATH"
+ actual="$(UCI_FIXTURE="$tmpdir/geodata" PATH="$path" ash -c '. "$1" >/dev/null; printf "%s" "$GEODATA_ASSETS_JSON"' ash "$tmpdir/snapshot.sh")"
+ assert_eq '["one.dat=https://x/one?x=y","two.dat=https://x/two with spaces","three.dat=https://x/it'"'"'s.dat"]' "$actual" "$awk_impl awk: user asset boundaries and quoting preserved"
+done
+pass 'geodata UCI list entries retain whitespace and quotes for generator validation'

@@ -1,0 +1,12 @@
+# Test seams remain in source; shipped entrypoints clear them before loading code.
+# The init script only gets a fixed PATH (its marker is XRAYWRT_PACKAGE_HARDEN_PATH).
+/^# XRAYWRT_PACKAGE_HARDEN$/c\
+unset XRAYWRT_BACKEND XRAYWRT_LIB_DIR SUBSCRIPTION_META_FILE JOB_PROC_DIR ROUTE_PROC_ROOT LOCK_DEPTH SETTINGS_LOADED SETTINGS_UCI_SNAPSHOT NET_REFRESH_DELAY RUNTIME_LOCK_TIMEOUT SUBSCRIPTION_MAX_BYTES SUBSCRIPTION_TIMEOUT LISTS_REMOTE_MAX_BYTES LISTS_REMOTE_MAX_URLS LISTS_REMOTE_TIMEOUT XRAYWRT_QUIET XRAYWRT_STOP https_proxy HTTPS_PROXY http_proxy HTTP_PROXY ALL_PROXY all_proxy no_proxy NO_PROXY CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR CURL_HOME\
+PATH=/usr/sbin:/usr/bin:/sbin:/bin\
+export PATH
+/^# XRAYWRT_PACKAGE_HARDEN_PATH$/c\
+PATH=/usr/sbin:/usr/bin:/sbin:/bin\
+export PATH
+s|^LIB=.*|LIB=/usr/lib/xraywrt|
+s|^BACKEND=.*|BACKEND=/usr/bin/xraywrt|
+s|"${XRAYWRT_LIB_DIR:-/usr/lib/xraywrt}"|/usr/lib/xraywrt|

@@ -1,0 +1,9 @@
+profile-schema 1
+mode direct-first
+mode-source user
+sniff tls
+direct-domains 2
+provider-fake-domains 0
+fake-domains 4
+fake-enabled 1
+geodata-ref geosite.dat

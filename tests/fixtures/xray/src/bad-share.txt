@@ -1,0 +1,2 @@
+vless://uuid@example.com:443?security=reality#node
+vmess://abc

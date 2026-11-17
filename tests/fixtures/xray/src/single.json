@@ -1,0 +1,15 @@
+{
+  "remarks": "Node",
+  "log": {"loglevel": "debug"},
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "protocol": "vless",
+      "settings": {"vnext": [{"address": "node.example.com", "port": 443, "users": [{"id": "11111111-2222-3333-4444-555555555555", "encryption": "none", "flow": "xtls-rprx-vision"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {"serverName": "www.example.com", "fingerprint": "chrome", "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8", "shortId": "6ba85179e30d4fc2"}}
+    },
+    {"tag": "direct", "protocol": "freedom"},
+    {"tag": "block", "protocol": "blackhole"}
+  ],
+  "routing": {"domainStrategy": "AsIs", "rules": [{"ip": ["geoip:private"], "outboundTag": "direct"}]}
+}

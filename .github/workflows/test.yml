@@ -1,0 +1,25 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build test image
+        run: docker build -t xraywrt-test:local -f Dockerfile.test .
+      - name: Run tests
+        run: docker run --rm -v "$PWD:/workspace:ro" -w /workspace xraywrt-test:local bash tests/run.sh

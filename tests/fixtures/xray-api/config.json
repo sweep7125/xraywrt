@@ -1,0 +1,58 @@
+{
+  "log": {
+    "loglevel": "debug"
+  },
+  "inbounds": [],
+  "api": {
+    "tag": "xraywrt-api",
+    "listen": "127.0.0.1:10085",
+    "services": [
+      "HandlerService",
+      "RoutingService",
+      "StatsService"
+    ]
+  },
+  "outbounds": [
+    {
+      "tag": "node-a",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "node-b",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "rules": [],
+    "balancers": [
+      {
+        "tag": "main",
+        "selector": [
+          "node-"
+        ],
+        "strategy": {
+          "type": "random"
+        },
+        "fallbackTag": "node-a"
+      },
+      {
+        "tag": "backup",
+        "selector": [
+          "node-b"
+        ],
+        "strategy": {
+          "type": "random"
+        },
+        "fallbackTag": "node-a"
+      }
+    ]
+  },
+  "observatory": {
+    "subjectSelector": [
+      "node-"
+    ],
+    "probeURL": "http://127.0.0.1:18080/",
+    "probeInterval": "1s",
+    "enableConcurrency": true
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "domain": [
+          "domain:example.com"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "socks",
+      "protocol": "socks",
+      "listen": "127.0.0.1",
+      "port": 1080,
+      "sniffing": {
+        "enabled": false,
+        "destOverride": [
+          "tls"
+        ],
+        "routeOnly": false
+      }
+    }
+  ]
+}

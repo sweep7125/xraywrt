@@ -1,0 +1,18 @@
+{
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "domain": [
+          "domain:example.com"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}

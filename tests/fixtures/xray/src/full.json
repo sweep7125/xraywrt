@@ -1,0 +1,158 @@
+{
+  "remarks": "Full",
+  "xraywrt": {
+    "mode": "direct-first"
+  },
+  "log": {
+    "loglevel": "debug",
+    "access": "/tmp/access.log"
+  },
+  "api": {
+    "tag": "api",
+    "services": [
+      "StatsService"
+    ]
+  },
+  "stats": {},
+  "metrics": {
+    "tag": "metrics"
+  },
+  "inbounds": [
+    {
+      "tag": "socks",
+      "port": 10808,
+      "listen": "127.0.0.1",
+      "protocol": "socks"
+    },
+    {
+      "port": 10809,
+      "protocol": "http"
+    }
+  ],
+  "fakedns": [
+    {
+      "ipPool": "100.64.0.0/10",
+      "poolSize": 1000
+    }
+  ],
+  "dns": {
+    "servers": [
+      "https://dns.example.net/dns-query"
+    ],
+    "hosts": {
+      "router.example.com": "192.168.1.1"
+    },
+    "queryStrategy": "UseIPv4"
+  },
+  "geodata": {
+    "assets": [
+      {
+        "file": "geosite.dat",
+        "url": "https://geo.example.com/geosite.dat"
+      }
+    ],
+    "cron": "0 4 * * *"
+  },
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "node.example.com",
+            "port": 443,
+            "users": [
+              {
+                "id": "11111111-2222-3333-4444-555555555555",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "www.example.com",
+          "fingerprint": "chrome",
+          "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8",
+          "shortId": "6ba85179e30d4fc2"
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "balancers": [
+      {
+        "tag": "auto",
+        "selector": [
+          "proxy"
+        ],
+        "strategy": {
+          "type": "leastPing"
+        }
+      }
+    ],
+    "rules": [
+      {
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "network": "tcp,udp",
+        "balancerTag": "auto"
+      }
+    ]
+  },
+  "observatory": {
+    "subjectSelector": [
+      "proxy"
+    ],
+    "probeURL": "https://probe.example.com/204",
+    "probeInterval": "5m"
+  },
+  "burstObservatory": {
+    "subjectSelector": [
+      "proxy"
+    ],
+    "pingConfig": {
+      "destination": "https://probe.example.com/204",
+      "interval": "1m"
+    }
+  },
+  "policy": {
+    "levels": {
+      "0": {
+        "handshake": 4,
+        "connIdle": 300
+      }
+    },
+    "system": {
+      "statsOutboundUplink": false
+    }
+  },
+  "transport": {},
+  "vendorExtension": {
+    "x": [
+      1,
+      2,
+      {
+        "y": null
+      }
+    ]
+  }
+}

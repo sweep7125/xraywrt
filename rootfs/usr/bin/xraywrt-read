@@ -1,0 +1,33 @@
+#!/bin/ash
+# XRAYWRT_PACKAGE_HARDEN
+
+# Read-only entry point for the LuCI read ACL. Mutating commands need the
+# write ACL and /usr/bin/xraywrt.
+BACKEND="${XRAYWRT_BACKEND:-/usr/bin/xraywrt}"
+
+case "${1:-}" in
+job-status)
+	[ $# -le 2 ] || exit 1
+	if [ $# -eq 2 ]; then
+		case "$2" in
+		*-*)
+			case "${2%%-*}" in '' | *[!0-9]*) exit 1 ;; esac
+			case "${2#*-}" in '' | *[!0-9]*) exit 1 ;; esac
+			;;
+		*) exit 1 ;;
+		esac
+	fi
+	;;
+logs-json) [ $# -le 2 ] || exit 1 ;;
+runtime-config | profiles | balancers | lists-json | status-json | service-state-json | subscription-json | core-version-json | profile-json | diagnostics-json | check-ip)
+	[ $# -eq 1 ] || exit 1
+	;;
+*)
+	echo "Usage: $0 {runtime-config|profiles|balancers|lists-json|status-json|service-state-json|subscription-json|core-version-json|profile-json|diagnostics-json|check-ip|logs-json [lines]|job-status [id]}" >&2
+	exit 1
+	;;
+esac
+
+# The subscription link is a credential: this wrapper never returns it.
+[ "$1" != subscription-json ] || set -- subscription-json --mask
+exec "$BACKEND" "$@"

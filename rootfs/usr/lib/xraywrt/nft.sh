@@ -1,0 +1,547 @@
+#!/bin/ash
+
+# nftables policy for IPv4 and IPv6. The whole table is rendered into one file
+# and replaced atomically with a single `nft -f` (one kernel transaction:
+# packets see the old or the new ruleset, never none). An identical ruleset
+# is not applied again.
+
+NFT_FILE=""
+
+nft_line() {
+	printf '%s\n' "$*" >>"$NFT_FILE"
+}
+
+nft_rule() {
+	local chain="$1"
+	shift
+	nft_line "add rule inet $NFT_TABLE_NAME $chain $*"
+}
+
+# Load plain addresses of one resolved list file into a set (512 per line).
+nft_fill_set() {
+	local set="$1" file="$2"
+
+	[ -s "$file" ] || return 0
+	{ grep -v ';' "$file" || true; } | awk -v t="$NFT_TABLE_NAME" -v s="$set" '
+		{ chunk = chunk (n ? "," : "") $0; n++ }
+		n == 512 { print "add element inet " t " " s " { " chunk " }"; chunk = ""; n = 0 }
+		END { if (n) print "add element inet " t " " s " { " chunk " }" }
+	' >>"$NFT_FILE"
+}
+
+nft_has_plain_entries() {
+	[ -s "$1" ] && grep -qv ';' "$1"
+}
+
+# Group exact port specs in first-appearance order, at most 512 addresses per
+# rule. Port-only entries emit one family-wide rule per spec.
+# $1 chain, $2 file, $3 family keyword (ip|ip6), $4 field (daddr|saddr),
+# $5 action.
+nft_port_rules() {
+	local chain="$1" file="$2" fam="$3" field="$4" action="$5"
+	local ports="" match=""
+
+	[ -s "$file" ] || return 0
+	{ grep ';' "$file" || true; } | awk -F ';' -v fam="$fam" -v field="$field" '
+		{
+			ports = $2
+			if (!(ports in seen)) { seen[ports] = 1; order[++specs] = ports }
+			if ($1 == "") { wildcard[ports] = 1; next }
+			chunk = int(count[ports]++ / 512) + 1
+			key = ports SUBSEP chunk
+			addresses[key] = addresses[key] (addresses[key] == "" ? "" : ", ") $1
+		}
+		END {
+			for (i = 1; i <= specs; i++) {
+				ports = order[i]
+				for (chunk = 1; chunk <= int((count[ports] + 511) / 512); chunk++)
+					print ports ";" fam " " field " { " addresses[ports SUBSEP chunk] " }"
+				if (wildcard[ports])
+					print ports ";meta nfproto " (fam == "ip" ? "ipv4" : "ipv6")
+			}
+		}
+	' | while IFS=';' read -r ports match; do
+		nft_rule "$chain" "$match meta l4proto { tcp, udp } th dport { $ports } $action"
+	done
+}
+
+
+# Main-table connected routes only; default-route devices are WAN links.
+nft_connected_prefixes() {
+	local fam="$1"
+
+	{
+		ip -"$fam" route show default
+		printf '%s\n' '--main--'
+		ip -"$fam" route show table main
+	} | awk -v fam="$fam" '
+		$0 == "--main--" { main = 1; next }
+		!main {
+			for (i = 1; i < NF; i++) if ($i == "dev") wan[$(i + 1)] = 1
+			next
+		}
+		$1 == "default" { next }
+		{
+			unreachable = ($1 == "unreachable")
+			prefix = unreachable ? $2 : $1
+			dev = ""
+			for (i = 1; i <= NF; i++) {
+				if ($i == "via") next
+				if ($i == "dev") dev = $(i + 1)
+			}
+			if (!unreachable && (dev in wan)) next
+			n = split(prefix, parts, "/")
+			if (n > 2 || (n == 2 && parts[2] !~ /^[0-9]+$/)) next
+			if (fam == 4) {
+				if (parts[1] !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) next
+				bits = n == 2 ? parts[2] + 0 : 32
+				if (bits < 16 || bits > 32) next
+			} else {
+				if (parts[1] !~ /:/ || parts[1] !~ /^[0-9a-fA-F:]+$/) next
+				bits = n == 2 ? parts[2] + 0 : 128
+				if (bits < 32 || bits > 128) next
+			}
+			print prefix
+		}
+	'
+}
+
+nft_render_base() {
+	local iface="" t="$NFT_TABLE_NAME" set="" prefix=""
+
+	nft_line "add table inet $t"
+	nft_line "delete table inet $t"
+	nft_line "add table inet $t"
+	for set in proxy_dst proxy_src direct_dst direct_src localv4; do
+		nft_line "add set inet $t $set { type ipv4_addr; flags interval; auto-merge; }"
+	done
+	for set in proxy_dst6 proxy_src6 direct_dst6 direct_src6 localv6; do
+		nft_line "add set inet $t $set { type ipv6_addr; flags interval; auto-merge; }"
+	done
+	for set in proxy_src_mac direct_src_mac; do
+		nft_line "add set inet $t $set { type ether_addr; }"
+	done
+	nft_line "add set inet $t source_ifaces { type ifname; }"
+	# Filled only while the subscription downloads (router traffic only).
+	nft_line "add set inet $t bypass_dst { type ipv4_addr; flags timeout; }"
+	nft_line "add set inet $t bypass_dst6 { type ipv6_addr; flags timeout; }"
+	nft_line "add element inet $t localv4 { $(echo "$LOCAL_NETS_V4" | sed 's/ /, /g') }"
+	nft_line "add element inet $t localv6 { $(echo "$LOCAL_NETS_V6" | sed 's/ /, /g') }"
+	# Separate additions let interval auto-merge absorb overlaps with fixed
+	# ranges and delegated aggregates. Sort for stable refresh comparisons.
+	for set in 4 6; do
+		nft_connected_prefixes "$set" | sort -u | while IFS= read -r prefix; do
+			nft_line "add element inet $t localv$set { $prefix }"
+		done
+	done
+	for iface in $SOURCE_INTERFACES; do
+		nft_line "add element inet $t source_ifaces { \"$iface\" }"
+	done
+	nft_line "add chain inet $t dns_hijack { type nat hook prerouting priority dstnat; policy accept; }"
+	nft_line "add chain inet $t mangle_prerouting { type filter hook prerouting priority mangle; policy accept; }"
+	nft_line "add chain inet $t prerouting_policy"
+	nft_line "add chain inet $t mangle_output { type route hook output priority mangle; policy accept; }"
+	nft_line "add chain inet $t proxy_redirect { type filter hook prerouting priority dstnat; policy accept; }"
+	nft_line "add chain inet $t api_guard { type filter hook output priority filter; policy accept; }"
+}
+
+# Reject only forwarded non-local client IPv6; returns leave fw4 in control.
+nft_render_client_ipv6() {
+	[ "${BLOCK_CLIENT_IPV6:-0}" = "1" ] && [ "$POLICY_MODE" = "direct-first" ] || return 0
+
+	nft_line "add chain inet $NFT_TABLE_NAME client_ipv6_egress { type filter hook forward priority -1; policy accept; }"
+	nft_rule client_ipv6_egress "ct direction reply return"
+	nft_rule client_ipv6_egress "iifname \"$NETBIRD_INTERFACE\" return"
+	nft_rule client_ipv6_egress "meta nfproto != ipv6 return"
+	nft_rule client_ipv6_egress "iifname != @source_ifaces return"
+	nft_rule client_ipv6_egress "fib daddr type local return"
+	nft_rule client_ipv6_egress "ip6 daddr @localv6 return"
+	nft_rule client_ipv6_egress "meta nfproto ipv6 meta l4proto tcp counter reject with tcp reset"
+	nft_rule client_ipv6_egress "meta nfproto ipv6 counter reject with icmpv6 type admin-prohibited"
+	return 0
+}
+
+# Shared guards: never touch local, already-marked, DNS or NTP traffic.
+nft_render_guards() {
+	local chain="$1"
+
+	# nft.sh requires route.sh loaded for route_ipv6_enabled.
+	route_ipv6_enabled || nft_rule "$chain" "meta nfproto ipv6 return"
+	nft_rule "$chain" "fib daddr type local return"
+	nft_rule "$chain" "ip daddr @localv4 return"
+	nft_rule "$chain" "ip6 daddr @localv6 return"
+	nft_rule "$chain" "meta mark & $NFT_INTERCEPT_MARK == $NFT_INTERCEPT_MARK return"
+	# NTP to fake-IP addresses is a domain the user routes via Xray.
+	if [ "$BYPASS_NTP" = "1" ]; then
+		nft_rule "$chain" "meta nfproto ipv6 udp dport 123 return"
+		nft_rule "$chain" "ip daddr != $FAKEIP_RANGE udp dport 123 return"
+	fi
+	return 0
+}
+
+nft_render_netbird_output() {
+	local m0="" dp=""
+
+	m0="$(printf '0x%x' "$NETBIRD_MARK")"
+	dp="$(printf '0x%x, 0x%x, 0x%x, 0x%x, 0x%x' $((NETBIRD_MARK | 0x10)) $((NETBIRD_MARK | 0x11)) $((NETBIRD_MARK | 0x20)) $((NETBIRD_MARK | 0x21)) $((NETBIRD_MARK | 0x22)))"
+	if [ "$NETBIRD_PROXY" = "1" ]; then
+		# Control-plane mark covers management, signal, relay, ICE and WireGuard
+		# transport; dataplane marks and replies to inbound flows stay direct.
+		nft_rule mangle_output "meta mark { $dp } return"
+		nft_rule mangle_output "ct direction original meta mark $m0 meta l4proto { tcp, udp } $NFT_MARK_SET accept"
+	elif [ "$DNS_MODE" = "fake-ip" ]; then
+		nft_rule mangle_output "meta nfproto ipv6 meta mark { $m0, $dp } return"
+		nft_rule mangle_output "ip daddr != $FAKEIP_RANGE meta mark { $m0, $dp } return"
+	else
+		nft_rule mangle_output "meta mark { $m0, $dp } return"
+	fi
+}
+
+# Mark traffic selected by one list kind in one chain.
+# $1 chain, $2 v4 file, $3 v6 file, $4 field, $5 set base name.
+nft_render_list_marks() {
+	local chain="$1" f4="$2" f6="$3" field="$4" set="$5"
+
+	nft_has_plain_entries "$f4" && nft_rule "$chain" "ip $field @$set meta l4proto { tcp, udp } $NFT_MARK_SET"
+	nft_has_plain_entries "$f6" && nft_rule "$chain" "ip6 $field @${set}6 meta l4proto { tcp, udp } $NFT_MARK_SET"
+	nft_port_rules "$chain" "$f4" ip "$field" "$NFT_MARK_SET"
+	nft_port_rules "$chain" "$f6" ip6 "$field" "$NFT_MARK_SET"
+}
+
+nft_render_direct_returns() {
+	local chain="$1" f4="$2" f6="$3"
+
+	nft_has_plain_entries "$f4" && nft_rule "$chain" "ip daddr @direct_dst return"
+	nft_has_plain_entries "$f6" && nft_rule "$chain" "ip6 daddr @direct_dst6 return"
+	nft_port_rules "$chain" "$f4" ip daddr return
+	nft_port_rules "$chain" "$f6" ip6 daddr return
+}
+
+# In fake-IP mode selected devices leave the caller via goto: a real-IP
+# return must exit prerouting_policy, not resume at its catch-all mark.
+# Direct devices: proxy-first returns them (redir-host) or splits them
+# (fake-IP); direct-first needs them only to send their fake-IPs to the direct
+# listener (spec 8: both modes).
+nft_direct_devices_active() {
+	if [ "$DNS_MODE" = "fake-ip" ]; then
+		[ "${DIRECT_LISTENER:-0}" = "1" ]
+	else
+		[ "$POLICY_MODE" = "proxy-first" ]
+	fi
+}
+
+nft_render_direct_devices() {
+	local chain="$1" f4="$2" f6="$3" fmac="$4" action="return"
+
+	if [ "$DNS_MODE" = "fake-ip" ]; then
+		[ "${DIRECT_LISTENER:-0}" = "1" ] || return 0
+		# proxy-first: goto skips the catch-all for real IPs; direct-first: jump
+		# returns real IPs to the remaining policy.
+		action="goto direct_device_policy"
+		[ "$POLICY_MODE" = "proxy-first" ] || action="jump direct_device_policy"
+		nft_line "add chain inet $NFT_TABLE_NAME direct_device_policy"
+		nft_rule direct_device_policy "meta nfproto ipv6 return"
+		nft_rule direct_device_policy "ip daddr != $FAKEIP_RANGE return"
+		[ "$DISABLE_QUIC" = "1" ] && nft_rule direct_device_policy "ip daddr $FAKEIP_RANGE udp dport 443 reject"
+		nft_rule direct_device_policy "ip daddr $FAKEIP_RANGE meta l4proto { tcp, udp } $NFT_MARK_SET | $NFT_DIRECT_MARK accept"
+	fi
+	nft_has_plain_entries "$fmac" && nft_rule "$chain" "ether saddr @direct_src_mac $action"
+	nft_has_plain_entries "$f4" && nft_rule "$chain" "ip saddr @direct_src $action"
+	nft_has_plain_entries "$f6" && nft_rule "$chain" "ip6 saddr @direct_src6 $action"
+	nft_port_rules "$chain" "$f4" ip saddr "$action"
+	nft_port_rules "$chain" "$f6" ip6 saddr "$action"
+}
+
+nft_render_fakeip() {
+	local chain="$1"
+
+	nft_rule "$chain" "ip daddr $FAKEIP_RANGE meta l4proto { tcp, udp } $NFT_MARK_SET"
+}
+
+nft_render_catch_all() {
+	local chain="$1"
+
+	nft_rule "$chain" "meta l4proto { tcp, udp } $NFT_MARK_SET"
+}
+
+# Render the full ruleset. Lists are resolved into $2 (a work directory).
+nft_render() {
+	local file="$1" dir="$2" kind="" kinds=""
+
+	NFT_FILE="$file"
+	NFT_MARK_SET="meta mark set meta mark | $NFT_INTERCEPT_MARK"
+	: >"$NFT_FILE" || return 1
+	if [ "$POLICY_MODE" = "proxy-first" ]; then
+		kinds="direct direct_src"
+	elif nft_direct_devices_active; then
+		kinds="dst src direct direct_src"
+	else
+		kinds="dst src direct"
+	fi
+	for kind in $kinds; do
+		lists_resolve "$kind" "$dir/$kind.4" "$dir/$kind.6" "$dir/$kind.mac" || return 1
+	done
+
+	nft_render_base
+	nft_render_client_ipv6
+	nft_fill_set proxy_dst "$dir/dst.4"
+	nft_fill_set proxy_dst6 "$dir/dst.6"
+	nft_fill_set proxy_src "$dir/src.4"
+	nft_fill_set proxy_src6 "$dir/src.6"
+	nft_fill_set proxy_src_mac "$dir/src.mac"
+	nft_fill_set direct_dst "$dir/direct.4"
+	nft_fill_set direct_dst6 "$dir/direct.6"
+	if nft_direct_devices_active; then
+		nft_fill_set direct_src "$dir/direct_src.4"
+		nft_fill_set direct_src6 "$dir/direct_src.6"
+		nft_fill_set direct_src_mac "$dir/direct_src.mac"
+	fi
+
+	# DNS hijack to dnsmasq (spec 7.1; the core DNS inbound is loopback-only) and NetBird ingress exclusion.
+	nft_rule dns_hijack "iifname \"$NETBIRD_INTERFACE\" return"
+	nft_rule dns_hijack "fib daddr type local return"
+	if [ "$DNS_HIJACK" = "1" ]; then
+		nft_rule dns_hijack "iifname @source_ifaces ip daddr != @localv4 meta l4proto { tcp, udp } th dport 53 redirect to :53"
+		nft_rule dns_hijack "iifname @source_ifaces ip6 daddr != @localv6 meta l4proto { tcp, udp } th dport 53 redirect to :53"
+	fi
+
+	# Client traffic.
+	nft_rule mangle_prerouting "iifname \"$NETBIRD_INTERFACE\" return"
+	nft_rule mangle_prerouting "iifname @source_ifaces jump prerouting_policy"
+	nft_rule prerouting_policy "ct direction reply return"
+	nft_render_guards prerouting_policy
+	[ "$DNS_HIJACK" = "1" ] && nft_rule prerouting_policy "meta l4proto { tcp, udp } th dport 53 return"
+	if [ "$POLICY_MODE" = "proxy-first" ]; then
+		nft_render_direct_returns prerouting_policy "$dir/direct.4" "$dir/direct.6"
+		nft_render_direct_devices prerouting_policy "$dir/direct_src.4" "$dir/direct_src.6" "$dir/direct_src.mac"
+		nft_render_catch_all prerouting_policy
+	else
+		# Own addresses that go direct win over the provider's list below.
+		nft_render_direct_returns prerouting_policy "$dir/direct.4" "$dir/direct.6"
+		nft_render_list_marks prerouting_policy "$dir/dst.4" "$dir/dst.6" daddr proxy_dst
+		nft_render_list_marks prerouting_policy "$dir/src.4" "$dir/src.6" saddr proxy_src
+		# Ethernet source headers are available on received L2 frames here,
+		# never on the router-originated output path.
+		if [ -s "$dir/src.mac" ]; then
+			nft_rule prerouting_policy "ether saddr @proxy_src_mac meta l4proto { tcp, udp } $NFT_MARK_SET"
+		fi
+		# Direct devices divert only their fake-IPs (jump): real IPs keep the lists above.
+		nft_direct_devices_active && nft_render_direct_devices prerouting_policy "$dir/direct_src.4" "$dir/direct_src.6" "$dir/direct_src.mac"
+		nft_render_fakeip prerouting_policy
+	fi
+
+	# Clear the matched bit so ICMP's reverse lookup cannot select our LOCAL route.
+	[ "$DISABLE_QUIC" = "1" ] && nft_rule prerouting_policy "meta mark & $NFT_INTERCEPT_MARK == $NFT_INTERCEPT_MARK udp dport 443 meta mark set meta mark ^ $NFT_INTERCEPT_MARK reject"
+
+	# TPROXY marked packets (client traffic and rerouted router traffic).
+	nft_rule proxy_redirect "iifname \"$NETBIRD_INTERFACE\" return"
+	if [ "$DNS_MODE" = "fake-ip" ] && [ "${DIRECT_LISTENER:-0}" = "1" ]; then
+		nft_rule proxy_redirect "meta mark & $NFT_DIRECT_MARK == $NFT_DIRECT_MARK meta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:$XRAY_DIRECT_TPROXY_PORT accept"
+	fi
+	nft_rule proxy_redirect "meta mark & $NFT_INTERCEPT_MARK == $NFT_INTERCEPT_MARK meta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:$XRAY_TPROXY_PORT"
+	# nft.sh requires route.sh loaded for route_ipv6_enabled.
+	route_ipv6_enabled && nft_rule proxy_redirect "meta mark & $NFT_INTERCEPT_MARK == $NFT_INTERCEPT_MARK meta nfproto ipv6 meta l4proto { tcp, udp } tproxy ip6 to [::1]:$XRAY_TPROXY_PORT"
+
+	# Router-originated traffic. Xray's own sockets carry the routing mark.
+	nft_rule mangle_output "meta mark & 0x000000ff == $XRAY_ROUTING_MARK return"
+	nft_rule mangle_output "ct direction reply return"
+	nft_rule mangle_output "meta l4proto { tcp, udp } th dport $XRAY_TPROXY_PORT return"
+	nft_render_guards mangle_output
+	nft_rule mangle_output "meta l4proto { tcp, udp } th dport 53 return"
+	nft_rule mangle_output "ip daddr @bypass_dst return"
+	nft_rule mangle_output "ip6 daddr @bypass_dst6 return"
+	nft_rule mangle_output "meta mark & $ZAPRET_DESYNC_MARK == $ZAPRET_DESYNC_MARK return"
+	nft_rule mangle_output "meta mark & $ZAPRET_DESYNC_MARK_POSTNAT == $ZAPRET_DESYNC_MARK_POSTNAT return"
+	nft_render_netbird_output
+	if [ "$POLICY_MODE" = "proxy-first" ]; then
+		# The router's own DHCP/DHCPv6 client talks to the LAN, never to the proxy.
+		nft_rule mangle_output "udp dport { 67, 547 } return"
+		nft_render_direct_returns mangle_output "$dir/direct.4" "$dir/direct.6"
+		nft_render_catch_all mangle_output
+	else
+		nft_render_direct_returns mangle_output "$dir/direct.4" "$dir/direct.6"
+		nft_render_list_marks mangle_output "$dir/dst.4" "$dir/dst.6" daddr proxy_dst
+		nft_render_fakeip mangle_output
+	fi
+	[ "$DISABLE_QUIC" = "1" ] && nft_rule mangle_output "meta mark & $NFT_INTERCEPT_MARK == $NFT_INTERCEPT_MARK udp dport 443 meta mark set meta mark ^ $NFT_INTERCEPT_MARK reject"
+
+	# Spec 16: a provider outbound must not reach the unauthenticated gRPC API;
+	# the unmarked `xray api` CLI still can.
+	nft_rule api_guard "meta mark & 0x000000ff == $XRAY_ROUTING_MARK ip daddr 127.0.0.0/8 tcp dport $XRAY_API_PORT reject with tcp reset"
+	nft_rule api_guard "meta mark & 0x000000ff == $XRAY_ROUTING_MARK ip6 daddr ::1 tcp dport $XRAY_API_PORT reject with tcp reset"
+	return 0
+}
+
+# Hash renderer inputs before resolving lists. The rendered hash alone only
+# avoids the kernel transaction, not the expensive Save & Apply second pass.
+nft_input_hash() {
+	local file="" files=""
+
+	set --
+	for file in "$PROFILE_FILE" "$RULES_FILE" "$SRC_LIST_FILE" \
+		"$DIRECT_SRC_LIST_FILE" "$POLICY_CACHE_DIR"/*.txt; do
+		[ ! -f "$file" ] || set -- "$@" "$file"
+	done
+	[ $# -eq 0 ] || files="$(sha256sum "$@")" || return 1
+	{
+		printf '%s\n' "$files" \
+			"${POLICY_MODE:-}" "${DNS_MODE:-}" "${DIRECT_LISTENER:-0}" \
+			"${SOURCE_INTERFACES:-}" "${DNS_HIJACK:-}" "${DISABLE_QUIC:-}" \
+			"${BYPASS_NTP:-}" "${BLOCK_CLIENT_IPV6:-0}" \
+			"${NETBIRD_INTERFACE:-}" "${NETBIRD_MARK:-}" "${NETBIRD_PROXY:-}" \
+			"$NFT_TABLE_NAME" "$NFT_INTERCEPT_MARK" "$NFT_DIRECT_MARK" \
+			"$XRAY_ROUTING_MARK" "$XRAY_DNS_PORT" "$XRAY_TPROXY_PORT" \
+			"$XRAY_DIRECT_TPROXY_PORT" "$XRAY_API_PORT" "$FAKEIP_RANGE" \
+			"$ZAPRET_DESYNC_MARK" "$ZAPRET_DESYNC_MARK_POSTNAT" \
+			"$LOCAL_NETS_V4" "$LOCAL_NETS_V6"
+		route_ipv6_enabled && printf '%s\n' '--ipv6--'
+		{ nft_connected_prefixes 4; nft_connected_prefixes 6; } | sort -u
+	} | sha256sum
+}
+
+# A stopped firewall is not ours to start: fw4 start picks the include up later.
+nft_fw4_input_reload() {
+	local error=""
+
+	nft list table inet fw4 6>&- 7>&- 8>&- 9>&- >/dev/null 2>&1 || return 0
+	if ! error="$(fw4 reload 6>&- 7>&- 8>&- 9>&- 2>&1 >/dev/null)"; then
+		warn "Failed to reload firewall4 input rules: ${error%%'
+'*}"
+		return 1
+	fi
+}
+
+# fw4 input REJECT must not discard TPROXY traffic or redirected guest DNS.
+nft_fw4_input_apply() {
+	local iface="" ifaces="" content=""
+
+	for iface in $SOURCE_INTERFACES; do
+		case "$ifaces" in
+		*"\"$iface\""*) ;;
+		*) ifaces="$ifaces${ifaces:+, }\"$iface\"" ;;
+		esac
+	done
+	content="meta mark & $NFT_INTERCEPT_MARK == $NFT_INTERCEPT_MARK accept"
+	[ -z "$ifaces" ] || content="$content
+iifname { $ifaces } meta l4proto {tcp,udp} th dport 53 ct status dnat accept"
+	[ -f "$FW4_INPUT_INCLUDE" ] && printf '%s\n' "$content" | cmp -s - "$FW4_INPUT_INCLUDE" 2>/dev/null && return 0
+	if ! { ensure_dir "${FW4_INPUT_INCLUDE%/*}" && atomic_write "$FW4_INPUT_INCLUDE" "$content"; }; then
+		warn "Failed to write firewall4 input rules"
+		return 0
+	fi
+	# A rejected include would make the next boot's `fw4 start` fail as a whole.
+	nft_fw4_input_reload || { rm -f "$FW4_INPUT_INCLUDE"; nft_fw4_input_reload; }
+	return 0
+}
+
+nft_fw4_input_cleanup() {
+	[ -e "$FW4_INPUT_INCLUDE" ] || return 0
+	# Remove before reload: re-entered cleanup cannot trigger another reload.
+	rm -f "$FW4_INPUT_INCLUDE" || return 1
+	nft_fw4_input_reload
+	return 0
+}
+
+nft_apply() {
+	rm -f "$NET_FP_FILE"
+	settings_require || return 1
+
+	local dir="$PKG_TMP_DIR/nft" rc=0 hash="" previous="" inputs="" previous_inputs=""
+
+	inputs="$(nft_input_hash)" || inputs=""
+	inputs="${inputs%% *}"
+	{ IFS= read -r previous <"$NFT_APPLIED_FILE"; } 2>/dev/null || :
+	{ IFS= read -r previous_inputs <"$NFT_APPLIED_FILE.inputs"; } 2>/dev/null || :
+	if [ -n "$inputs" ] && [ -n "$previous" ] &&
+		[ "$inputs $previous" = "$previous_inputs" ] && nft_active; then
+		nft_fw4_input_apply
+		return $?
+	fi
+	# Stale list files of an earlier run must not be loaded.
+	rm -rf "$dir"
+	ensure_dir "$dir" || return 1
+	nft_render "$dir/ruleset.nft" "$dir" || rc=1
+	if [ "$rc" -eq 0 ]; then
+		hash="$(sha256sum "$dir/ruleset.nft")" || rc=1
+		hash="${hash%% *}"
+	fi
+	if [ "$rc" -eq 0 ] && [ "$hash" = "$previous" ] && nft_active; then
+		[ -z "$inputs" ] || atomic_write "$NFT_APPLIED_FILE.inputs" "$inputs $hash" || rm -f "$NFT_APPLIED_FILE.inputs"
+		rm -rf "$dir"
+		nft_fw4_input_apply
+		return $?
+	fi
+	# Stop may have given up on the lock and cleaned up unlocked: a late job
+	# must not bring the table back.
+	[ "$rc" -ne 0 ] || [ ! -f "$USER_STOP_FILE" ] || { rm -rf "$dir"; return 1; }
+	[ "$rc" -eq 0 ] && nft -f "$dir/ruleset.nft" || rc=1
+	if [ "$rc" -ne 0 ]; then
+		rm -f "$NFT_APPLIED_FILE" "$NFT_APPLIED_FILE.inputs"
+		err_code nft_policy "Failed to apply nftables policy (see %s)" "$dir/ruleset.nft"
+		return 1
+	fi
+	{ printf '%s\n' "$hash" >"$dir/ruleset.sha256" &&
+		mv -f "$dir/ruleset.sha256" "$NFT_APPLIED_FILE"; } || rm -f "$NFT_APPLIED_FILE"
+	[ -z "$inputs" ] || atomic_write "$NFT_APPLIED_FILE.inputs" "$inputs $hash" || rm -f "$NFT_APPLIED_FILE.inputs"
+	rm -rf "$dir"
+	nft_bypass_restore
+	nft_fw4_input_apply
+}
+
+nft_apply_if_ready() {
+	service_ready || return 0
+	nft_apply
+}
+
+# Keep the harmless fw4 include across stops and watchdog flaps; only uninstall removes it.
+nft_cleanup() {
+	rm -f "$NET_FP_FILE" "$NFT_APPLIED_FILE" "$NFT_APPLIED_FILE.inputs"
+	nft delete table inet "$NFT_TABLE_NAME" 2>/dev/null || :
+}
+
+nft_active() {
+	nft -t list table inet "$NFT_TABLE_NAME" >/dev/null 2>&1
+}
+
+# nft_bypass_elements <add|delete> <suffix> <addresses...>
+nft_bypass_elements() {
+	local action="$1" suffix="$2" addr=""
+	shift 2
+
+	for addr in "$@"; do
+		if is_ipv4 "$addr"; then
+			nft "$action" element inet "$NFT_TABLE_NAME" bypass_dst "{ $addr$suffix }" 2>/dev/null
+		elif is_ipv6 "$addr"; then
+			nft "$action" element inet "$NFT_TABLE_NAME" bypass_dst6 "{ $addr$suffix }" 2>/dev/null
+		fi
+	done
+}
+
+# nft_bypass <add|delete> <addresses...>: let the router reach these addresses
+# directly. "add" uses a timeout so a killed download cannot leave them, and
+# a tmpfs marker so nft_apply can restore them after it replaces the table.
+nft_bypass() {
+	local action="$1" suffix="" list="$PKG_TMP_DIR/bypass.list"
+	shift
+
+	if [ "$action" = add ]; then
+		suffix=" timeout 2m"
+		printf '%s\n' "$@" >>"$list" 2>/dev/null || :
+	else
+		# shortcut: one download at a time owns the marker, upgrade if several overlap.
+		rm -f "$list"
+	fi
+	nft_bypass_elements "$action" "$suffix" "$@"
+	return 0
+}
+
+# The table was replaced: put back the elements of a download still running.
+# A marker older than the 2 minute element timeout belongs to a dead download.
+nft_bypass_restore() {
+	local list="$PKG_TMP_DIR/bypass.list" addrs=""
+
+	[ -n "$(find "$list" -mmin -2 2>/dev/null)" ] || return 0
+	addrs="$(cat "$list")" || return 0
+	# shellcheck disable=SC2086
+	nft_bypass_elements add " timeout 2m" $addrs
+}

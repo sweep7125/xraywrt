@@ -1,0 +1,300 @@
+{
+  "api": {
+    "listen": "127.0.0.1:10085",
+    "services": [
+      "HandlerService",
+      "RoutingService",
+      "StatsService"
+    ],
+    "tag": "xraywrt-api"
+  },
+  "dns": {
+    "servers": [
+      {
+        "address": "fakedns",
+        "domains": [
+          "geosite:youtube",
+          "domain:example.com",
+          "full:api.example.org",
+          "keyword:tracker",
+          "regexp:^cdn[0-9]+\\.example\\.net$"
+        ],
+        "queryStrategy": "UseIPv4",
+        "skipFallback": true
+      },
+      "192.0.2.53"
+    ],
+    "tag": "xraywrt-dns-internal"
+  },
+  "fakedns": [
+    {
+      "ipPool": "198.18.0.0/15",
+      "poolSize": 65535
+    }
+  ],
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 7894,
+      "protocol": "tunnel",
+      "settings": {
+        "allowedNetwork": "tcp,udp",
+        "followRedirect": true
+      },
+      "sniffing": {
+        "destOverride": [
+          "fakedns"
+        ],
+        "enabled": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      },
+      "tag": "xraywrt-tproxy4"
+    },
+    {
+      "listen": "::1",
+      "port": 7894,
+      "protocol": "tunnel",
+      "settings": {
+        "allowedNetwork": "tcp,udp",
+        "followRedirect": true
+      },
+      "sniffing": {
+        "destOverride": [
+          "fakedns"
+        ],
+        "enabled": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      },
+      "tag": "xraywrt-tproxy6"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 7895,
+      "protocol": "tunnel",
+      "settings": {
+        "allowedNetwork": "tcp,udp",
+        "followRedirect": true
+      },
+      "sniffing": {
+        "destOverride": [
+          "fakedns"
+        ],
+        "enabled": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      },
+      "tag": "xraywrt-fakeip-direct"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 7874,
+      "protocol": "tunnel",
+      "settings": {
+        "allowedNetwork": "tcp,udp"
+      },
+      "tag": "xraywrt-dns-in"
+    }
+  ],
+  "log": {
+    "access": "none",
+    "dnsLog": false,
+    "loglevel": "debug"
+  },
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "node.example.com",
+            "port": 443,
+            "users": [
+              {
+                "encryption": "none",
+                "flow": "xtls-rprx-vision",
+                "id": "11111111-2222-3333-4444-555555555555"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "realitySettings": {
+          "fingerprint": "chrome",
+          "publicKey": "Y_9LJMXGRQxqfOd5sGpJ6LVpdqVAo9hTk7HOtd5n3k8",
+          "serverName": "www.example.com",
+          "shortId": "6ba85179e30d4fc2"
+        },
+        "security": "reality",
+        "sockopt": {
+          "mark": 2
+        }
+      },
+      "tag": "proxy"
+    },
+    {
+      "protocol": "freedom",
+      "settings": {
+        "finalRules": [
+          {
+            "action": "allow",
+            "port": "53"
+          },
+          {
+            "action": "block",
+            "ip": [
+              "0.0.0.0/8",
+              "10.0.0.0/8",
+              "100.64.0.0/10",
+              "127.0.0.0/8",
+              "169.254.0.0/16",
+              "172.16.0.0/12",
+              "192.0.0.0/24",
+              "192.0.2.0/24",
+              "192.88.99.0/24",
+              "192.168.0.0/16",
+              "198.51.100.0/24",
+              "203.0.113.0/24",
+              "224.0.0.0/3",
+              "::/127",
+              "fe80::/10",
+              "fc00::/7",
+              "ff00::/8"
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "sockopt": {
+          "mark": 2
+        }
+      },
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "streamSettings": {
+        "sockopt": {
+          "mark": 2
+        }
+      },
+      "tag": "block"
+    },
+    {
+      "protocol": "freedom",
+      "settings": {
+        "finalRules": [
+          {
+            "action": "allow",
+            "port": "53"
+          },
+          {
+            "action": "block",
+            "ip": [
+              "0.0.0.0/8",
+              "10.0.0.0/8",
+              "100.64.0.0/10",
+              "127.0.0.0/8",
+              "169.254.0.0/16",
+              "172.16.0.0/12",
+              "192.0.0.0/24",
+              "192.0.2.0/24",
+              "192.88.99.0/24",
+              "192.168.0.0/16",
+              "198.51.100.0/24",
+              "203.0.113.0/24",
+              "224.0.0.0/3",
+              "::/127",
+              "fe80::/10",
+              "fc00::/7",
+              "ff00::/8"
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "sockopt": {
+          "domainStrategy": "ForceIP",
+          "mark": 2
+        }
+      },
+      "tag": "xraywrt-direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "xraywrt-block"
+    },
+    {
+      "protocol": "dns",
+      "settings": {
+        "rules": [
+          {
+            "action": "hijack",
+            "qType": "1,28"
+          },
+          {
+            "action": "return"
+          }
+        ]
+      },
+      "streamSettings": {
+        "sockopt": {
+          "mark": 2
+        }
+      },
+      "tag": "xraywrt-dns"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "inboundTag": [
+          "xraywrt-dns-in"
+        ],
+        "outboundTag": "xraywrt-dns"
+      },
+      {
+        "inboundTag": [
+          "xraywrt-dns-internal"
+        ],
+        "ip": [
+          "127.0.0.1",
+          "192.0.2.53"
+        ],
+        "outboundTag": "xraywrt-direct",
+        "port": 53
+      },
+      {
+        "ip": [
+          "198.18.0.0/15"
+        ],
+        "outboundTag": "xraywrt-block"
+      },
+      {
+        "inboundTag": [
+          "xraywrt-fakeip-direct"
+        ],
+        "outboundTag": "xraywrt-direct"
+      },
+      {
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}

@@ -1,0 +1,150 @@
+#!/bin/ash
+# XRAYWRT_PACKAGE_HARDEN
+
+LIB="${XRAYWRT_LIB_DIR:-/usr/lib/xraywrt}"
+. "$LIB/constants.sh" && . "$LIB/helpers.sh" && xraywrt_load_modules "${1:-}" || exit 1
+
+usage() {
+	cat >&2 <<'EOF'
+Usage: xraywrt <command>
+Service:  prepare | run-service | wait-stopped | stop-now | recover | reload | migrate | uninstall
+Config:   read-config [tmp] | runtime-config | save-config <tmp> | restore-config
+          profiles | config-check [tmp] | check-ip
+Subscr.:  subscription-json [--mask] | set-subscription <url> <0|1> | update-subscription [url]
+          add-subscription <url> | use-subscription <id> | delete-subscription <id>
+Lists:    lists-json | apply-lists <rules-tmp|-> <src-tmp|-> <direct-src-tmp|-> | update-lists
+Updates:  auto-update | net-refresh | core-check | core-version-json
+          core-update [--no-rollback]
+          geodata-update [--force | --file /tmp/F --name NAME.dat]
+Balancers: balancers | balancer-set <tag> <target|"">
+Status:   status-json | service-state-json | profile-json | diagnostics-json | logs-json [lines]
+Jobs:     job-start <op> [args] | job-status [id]
+EOF
+	exit 1
+}
+
+need_args() {
+	[ "$1" -eq "$2" ] || usage
+}
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+job-start) job_start "$@" ;;
+job-run) job_run "$@" ;;
+job-status) job_status "$@" ;;
+prepare) service_prepare_cmd ;;
+run-service) run_service ;;
+wait-stopped) service_wait_stopped ;;
+stop-now)
+	need_args $# 0
+	# Not a job: Stop must work while a long job holds the only job slot.
+	( /etc/init.d/xraywrt stop ) 8>&- 9>&- </dev/null >/dev/null 2>&1 &
+	printf '{}\n'
+	;;
+recover) with_lock service_recover ;;
+recover-runtime)
+	need_args $# 1
+	is_uint "$1" || usage
+	with_lock service_recovery_reload "$1"
+	;;
+uninstall)
+	need_args $# 0
+	# Stop waits for run-service, which needs the runtime lock for cleanup.
+	/etc/init.d/xraywrt stop 9>&- >/dev/null 2>&1 || true
+	with_lock uninstall_cleanup
+	;;
+reload) with_lock service_reload ;;
+migrate) with_lock migrate ;;
+read-config) config_read_json "${1:-}" ;;
+runtime-config)
+	need_args $# 0
+	runtime_config_json
+	;;
+save-config)
+	need_args $# 1
+	config_locked config_save "$1"
+	;;
+restore-config) config_locked config_restore ;;
+balancers)
+	need_args $# 0
+	balancers_json
+	;;
+balancer-set)
+	need_args $# 2
+	with_lock balancer_set "$1" "$2"
+	;;
+profiles)
+	need_args $# 0
+	config_profiles_json
+	;;
+config-check)
+	[ $# -le 1 ] || usage
+	RUNTIME_LOCK_TIMEOUT=5 with_lock config_check_json "${1:-}"
+	;;
+check-ip)
+	need_args $# 0
+	check_ip_json
+	;;
+subscription-json)
+	[ $# -eq 0 ] || [ "$*" = --mask ] || usage
+	subscription_json "$@"
+	;;
+set-subscription)
+	need_args $# 2
+	with_lock subscription_set "$1" "$2"
+	;;
+update-subscription)
+	[ $# -le 1 ] || usage
+	subscription_update "${1:-}"
+	;;
+add-subscription)
+	need_args $# 1
+	subscription_add "$1"
+	;;
+use-subscription)
+	need_args $# 1
+	subscription_use "$1"
+	;;
+delete-subscription)
+	need_args $# 1
+	with_lock subscription_delete "$1"
+	;;
+lists-json)
+	need_args $# 0
+	lists_json
+	;;
+apply-lists)
+	[ $# -eq 3 ] || usage
+	lists_apply "$@"
+	;;
+update-lists) lists_refresh ;;
+auto-update)
+	settings_load || exit 1
+	subscription_due || { [ "$LISTS_INTERVAL" -gt 0 ] && [ -n "$(lists_urls)" ]; } || exit 0
+	job_start auto-update >/dev/null
+	;;
+net-refresh) net_refresh_coalesced ;;
+core-update)
+	core_args_valid "$@" || usage
+	core_update_locked "$@"
+	;;
+geodata-update)
+	geodata_args_valid "$@" || usage
+	with_lock geodata_update "$@"
+	;;
+core-check)
+	need_args $# 0
+	core_check_locked
+	;;
+core-version-json) core_version_json ;;
+diagnostics-json)
+	need_args $# 0
+	diagnostics_json
+	;;
+status-json) status_json ;;
+profile-json) profile_json ;;
+service-state-json) service_state_json ;;
+logs-json) logs_json "${1:-200}" ;;
+*) usage ;;
+esac

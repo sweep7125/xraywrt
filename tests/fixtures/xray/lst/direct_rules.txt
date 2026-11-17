@@ -1,0 +1,3 @@
+# own direct sites, including a fake-IP list overlap
+example.com direct
+full:direct.example.org direct

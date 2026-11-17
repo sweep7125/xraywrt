@@ -1,0 +1,9 @@
+/etc/config/xraywrt
+/etc/xraywrt/hwid
+/etc/xraywrt/subscription.json
+/opt/xraywrt/config.json
+/opt/xraywrt/lst
+/etc/xraywrt/core.json
+/opt/xraywrt/subs/*/config.json
+/opt/xraywrt/subs/*/subscription.json
+/opt/xraywrt/subs/*/lists

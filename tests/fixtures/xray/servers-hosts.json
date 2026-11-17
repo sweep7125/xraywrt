@@ -1,0 +1,16 @@
+{
+  "outbounds": [
+    {"tag": "vless", "protocol": "vless", "settings": {"vnext": [{"address": "VLess.Example.com", "port": 443, "users": [{"id": "11111111-2222-3333-4444-555555555555", "encryption": "none"}]}, {"address": "203.0.113.1", "port": 443, "users": [{"id": "11111111-2222-3333-4444-555555555555", "encryption": "none"}]}]}},
+    {"tag": "vless-flat", "protocol": "vless", "settings": {"address": "flat.example.com", "port": 443, "id": "11111111-2222-3333-4444-555555555555", "encryption": "none"}},
+    {"tag": "vmess", "protocol": "vmess", "settings": {"vnext": [{"address": "vmess.example.com", "port": 443, "users": [{"id": "11111111-2222-3333-4444-555555555555"}]}]}},
+    {"tag": "trojan", "protocol": "trojan", "settings": {"servers": [{"address": "trojan.example.com", "port": 443, "password": "p"}]}},
+    {"tag": "ss", "protocol": "shadowsocks", "settings": {"servers": [{"address": "ss.example.com", "port": 8388, "method": "aes-128-gcm", "password": "p"}, {"address": "2001:db8::1", "port": 8388, "method": "aes-128-gcm", "password": "p"}]}},
+    {"tag": "socks", "protocol": "socks", "settings": {"servers": [{"address": "socks.example.com", "port": 1080}]}},
+    {"tag": "http", "protocol": "http", "settings": {"servers": [{"address": "http.example.com", "port": 3128}]}},
+    {"tag": "hy", "protocol": "hysteria", "settings": {"version": 2, "address": "hy.example.com", "port": 443}},
+    {"tag": "wg", "protocol": "wireguard", "settings": {"secretKey": "cGVlcA==", "peers": [{"endpoint": "wg.example.com:51820", "publicKey": "cGVlcA=="}, {"endpoint": "[2001:db8::2]:51820", "publicKey": "cGVlcA=="}, {"endpoint": "198.51.100.7:51820", "publicKey": "cGVlcA=="}]}},
+    {"tag": "dup", "protocol": "trojan", "settings": {"servers": [{"address": "vless.example.com", "port": 443, "password": "p"}]}},
+    {"tag": "bad", "protocol": "trojan", "settings": {"servers": [{"address": "bad host\nx", "port": 443, "password": "p"}]}},
+    {"tag": "free", "protocol": "freedom", "settings": {"redirect": "other.example.com:80"}}
+  ]
+}

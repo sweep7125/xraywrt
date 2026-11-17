@@ -1,0 +1,502 @@
+#!/usr/bin/ucode
+'use strict';
+import { readfile, writefile, stdin, open } from 'fs';
+
+function read(path) {
+	let s = path == null ? stdin.read('all') : readfile(path);
+	if (s == null) die('Cannot read JSON input');
+	return s;
+}
+// jq retains decimal precision and scale; ucode's JSON numbers are doubles.
+// Keep validated number tokens separate from ordinary, untrusted JSON objects.
+let decimal = {};
+function number(s) {
+	let m = match(s, /^([+-]?)([0-9]*)(\.([0-9]*))?([eE]([+-]?[0-9]+))?$/);
+	if (!m || !length((m[2] ?? '') + (m[4] ?? ''))) return null;
+	let digits = replace(m[2] + (m[4] ?? ''), /^0+/, '') || '0';
+	let exp = +(m[6] ?? '0') - length(m[4] ?? ''), adjusted = exp + length(digits) - 1, out;
+	if (exp > 0 || adjusted < -6)
+		out = substr(digits, 0, 1) + (length(digits) > 1 ? '.' + substr(digits, 1) : '') + 'E' + (adjusted >= 0 ? '+' : '') + adjusted;
+	else if (exp < 0) {
+		let at = length(digits) + exp;
+		while (at <= 0) { digits = '0' + digits; at++; }
+		out = substr(digits, 0, at) + '.' + substr(digits, at);
+	} else out = digits;
+	return proto({text: (m[1] == '-' ? '-' : '') + out}, decimal);
+}
+// Empty/malformed snapshot numbers intentionally become null, not an error:
+// keep status, profile, diagnostics and history readable with damaged state.
+function num(s) {
+	if (s == 'NaN' || s == '-NaN') return null;
+	// Plain integers stay plain: callers compare and format them directly.
+	if (match(s, /^(0|-?[1-9][0-9]{0,14})$/)) return +s;
+	if (s == 'Infinity' || s == 'Inf' || s == '+Infinity' || s == '+Inf') return proto({text: '1.7976931348623157e+308'}, decimal);
+	if (s == '-Infinity' || s == '-Inf') return proto({text: '-1.7976931348623157e+308'}, decimal);
+	return number(s);
+}
+function parse(s) {
+	let native = json(s);
+	// Native small-integer JSON intentionally accepts json-c extensions (comments,
+	// single quotes, trailing commas); emit() still produces strict JSON, never code.
+	let bare = replace(s, /"([^"\\]|\\.)*"/g, '');
+	if (!match(bare, /[0-9][.eE]|[0-9]{16}|-0|Infinity|NaN/)) return native;
+	let tokens = match(s, /"([^"\\]|\\.)*"|[^][{}:, \t\r\n"]+|[][{}:,"]/g) ?? [], pos = 0;
+	function take() {
+		if (pos >= length(tokens)) die('Unexpected end of JSON input');
+		return tokens[pos++][0];
+	}
+	function value() {
+		let t = take();
+		if (t == '{' || t == '[') {
+			let obj = t == '{' ? {} : [], end = t == '{' ? '}' : ']';
+			if (pos < length(tokens) && tokens[pos][0] == end) { pos++; return obj; }
+			while (pos < length(tokens)) {
+				let key;
+				if (t == '{') {
+					key = take();
+					if (length(key) < 2 || substr(key, 0, 1) != '"' || substr(key, -1) != '"') die('Expected JSON object key');
+					if (take() != ':') die('Expected JSON colon');
+				}
+				let v = value();
+				if (t == '{') obj[json(key)] = v; else push(obj, v);
+				let separator = take();
+				if (separator == end) return obj;
+				if (separator != ',') die('Expected JSON comma or closing delimiter');
+			}
+			die('Unexpected end of JSON input');
+		}
+		if (length(t) >= 2 && substr(t, 0, 1) == '"' && substr(t, -1) == '"') return json(t);
+		if (t == 'true' || t == 'false' || t == 'null') return t == 'true' ? true : t == 'false' ? false : null;
+		let n = num(t);
+		if (n == null && t != 'NaN' && t != '-NaN') die('Unexpected JSON token');
+		return n;
+	}
+	let parsed = value();
+	if (pos != length(tokens)) die('Unexpected trailing JSON token');
+	return parsed;
+}
+function valid_utf8(s) {
+	for (let i = 0; i < length(s); i++) {
+		let b = ord(s, i), n = 0, low = 128, high = 191;
+		if (b < 128) continue;
+		if (b >= 194 && b <= 223) n = 1;
+		else if (b >= 224 && b <= 239) { n = 2; if (b == 224) low = 160; if (b == 237) high = 159; }
+		else if (b >= 240 && b <= 244) { n = 3; if (b == 240) low = 144; if (b == 244) high = 143; }
+		else return false;
+		if (i + n >= length(s) || ord(s, i + 1) < low || ord(s, i + 1) > high) return false;
+		while (n-- > 0) { b = ord(s, ++i); if (b < 128 || b > 191) return false; }
+	}
+	return true;
+}
+// json-c preserves invalid bytes; jq replaces each malformed UTF-8 sequence.
+let non_ascii = regexp('[' + chr(128) + '-' + chr(255) + ']+', 'g');
+function utf8(s) {
+	// POSIX regex stops at NUL; repair each binary-string segment.
+	if (index(s, '\x00') >= 0) return join('\x00', map(split(s, '\x00'), utf8));
+	return replace(s, non_ascii, (run) => {
+		let out = '';
+		for (let i = 0; i < length(run); i++) {
+			let start = i, b = ord(run, i), n = b >= 194 && b <= 223 ? 1 : b >= 224 && b <= 239 ? 2 : b >= 240 && b <= 244 ? 3 : 0;
+			if (!n) { out += '�'; continue; }
+			while (n > 0 && i + 1 < length(run) && ord(run, i + 1) >= 128 && ord(run, i + 1) <= 191) { i++; n--; }
+			let seq = substr(run, start, i - start + 1);
+			out += n == 0 && valid_utf8(seq) ? seq : '�';
+		}
+		return out;
+	});
+}
+function padding(depth) {
+	let s = '';
+	while (depth-- > 0) s += '  ';
+	return s;
+}
+function encode(v, pretty, depth) {
+	depth ??= 0;
+	if (type(v) == 'object' && proto(v) == decimal) return v.text;
+	let t = type(v), out = [], indent = padding(depth + 1);
+	if (t == 'array' || t == 'object') {
+		for (let key, value in v) {
+			push(out, (t == 'object' ? sprintf('%J', utf8(key)) + (pretty ? ': ' : ':') : '') + encode(v[key], pretty, depth + 1));
+		}
+		let l = t == 'array' ? '[' : '{', r = t == 'array' ? ']' : '}';
+		return !length(out) ? l + r : l + (pretty ? '\n' + indent : '') + join(pretty ? ',\n' + indent : ',', out) + (pretty ? '\n' + padding(depth) : '') + r;
+	}
+	return sprintf('%J', t == 'string' ? utf8(v) : v);
+}
+function emit_rawfile(path) {
+	let file = open(path, 'r');
+	if (file == null) die('Cannot read raw JSON file');
+	let carry = '', chunk;
+	print('"');
+	while ((chunk = file.read(65536)) != null && length(chunk)) {
+		let data = carry + chunk;
+		carry = '';
+		// Defer an incomplete UTF-8 sequence; repairing each half would differ
+		// from jq, including when the complete sequence itself is malformed.
+		let end = length(data), start = end - 1;
+		for (let n = 0; start >= 0 && n < 3 && ord(data, start) >= 128 && ord(data, start) <= 191; n++) start--;
+		if (start >= 0) {
+			let b = ord(data, start), width = b >= 194 && b <= 223 ? 2 : b >= 224 && b <= 239 ? 3 : b >= 240 && b <= 244 ? 4 : 0;
+			if (width > end - start) { carry = substr(data, start); data = substr(data, 0, start); }
+		}
+		let quoted = encode(data);
+		print(substr(quoted, 1, length(quoted) - 2));
+	}
+	let failure = file.error();
+	file.close();
+	if (failure != null) die(failure);
+	let quoted = encode(carry);
+	print(substr(quoted, 1, length(quoted) - 2), '"');
+}
+function emit(v, pretty) { print(encode(v, pretty), '\n'); }
+function raw(v) { return type(v) == 'string' ? utf8(v) : encode(v); }
+function fallback(v, d) { return v == null || v === false ? d : v; }
+function lines(s, sep) { return filter(split(s ?? '', sep ?? '\n'), (v) => length(v) > 0); }
+function numeric(v) { return type(v) == 'object' && proto(v) == decimal ? +v.text : v; }
+function opt(v) { return v == null || v == '' ? null : v; }
+// Spec 15: secret values in the runtime view.
+const SECRETS = ['id', 'password', 'privateKey', 'publicKey', 'shortId', 'pass', 'user', 'secretKey', 'preSharedKey'];
+function redact(v) {
+	let t = type(v);
+	if (t == 'array') return map(v, redact);
+	if (t != 'object' || proto(v) == decimal) return v;
+	for (let k in keys(v)) v[k] = k in SECRETS ? '***' : redact(v[k]);
+	return v;
+}
+function merge(a, b) {
+	for (let k, v in b) a[k] = v;
+	return a;
+}
+function override_count(a) {
+	let keys = {mode: true}, overridden = {};
+	for (let row in lines(a.provider)) keys[split(row, ' ')[0]] = true;
+	for (let key in lines(a.overrides, ' '))
+		if (keys[key]) overridden[key] = true;
+	return length(overridden);
+}
+
+function dns_raw_lost(a) {
+	return a.dns_raw_lost || (type(a.dns_outbounds) == 'array' && a.dns_raw_via && !(a.dns_raw_via in a.dns_outbounds) ? a.dns_raw_via : '');
+}
+
+function build(shape, a) {
+	switch (shape) {
+	case 'object': return a;
+	case 'config': return {path: a.p, content: read()};
+	case 'runtime': return {content: encode(redact(parse(read())), true) + '\n', generated: a.generated};
+	case 'connected': {
+		if (a.result.apply_status != 'saved') return a.result;
+		let result = {};
+		for (let key, value in a.result)
+			if (key != 'apply_status' && key != 'pending_reason') result[key] = value;
+		return result;
+	}
+	case 'changed': return {changed: a.c == '1' || a.r == 'changed'};
+	case 'version': return {version: a.v, installed: a.v != ''};
+	case 'core': return {updated: a.u == '1', version: a.v, error: a.e == '' ? null : a.e, verified: a.verified == '1', sha256: a.sha ? a.sha : null};
+	case 'job': return {id: a.id, op: a.op, state: 'running', started: a.started, finished: null, result: null, error: null};
+	case 'finish': return {state: a.state, finished: a.finished, result: a.result, error: a.state == 'ok' ? null : a.error};
+	case 'config-check': return {ok: a.ok == '1', error: a.e == '' ? null : a.e, output: a.out == '' ? null : a.out};
+	case 'core-check': {
+		return {installed: {tag: opt(a.tag), source: opt(a.source), version: opt(a.iversion)},
+			latest: {tag: opt(a.latest), size: num(a.size ?? ''), version: opt(a.lversion)},
+			update_available: a.available == '1', xray_version: opt(a.version), error: opt(a.e)};
+	}
+	case 'restart': return a.e == '' ? {restarted: a.restarted} : {restarted: a.restarted, error: a.e};
+	case 'service': return {apply_warning: opt(a.apply_warning), degraded_reason: opt(a.degraded_reason), running: a.running, enabled: a.enabled, state: a.state, dns_ok: a.dns_ok, last_error: a.last_error};
+	case 'status': return {
+		apply_warning: opt(a.apply_warning), observatory_signal: a.observatory_signal == '1', has_balancers: a.has_balancers == '1', netbird: a.netbird == '1', degraded_reason: opt(a.degraded_reason), overrides: override_count(a),
+		running: a.running, enabled: a.enabled, state: a.state, last_error: a.last_error, version: a.version, core: a.core,
+		core_installed: a.core != '', subscription_configured: a.url != '',
+		subscription_insecure: index(lc(a.url), 'http://') == 0,
+		config_valid: a.config_valid, config_backup: a.config_backup, config_error: a.config_error, dns_mode: a.dns_mode, dns_ok: a.dns_ok, policy_active: a.policy,
+		mode: a.mode, block_client_ipv6: a.block_client_ipv6 == '1', interfaces: lines(a.interfaces, ' '), custom_dns_servers: lines(a.custom, ' '),
+		lists: {dst: num(a.dst), src: num(a.src), direct: num(a.direct), direct_src: num(a.direct_src)},
+		route: {table: a.table, priority: a.priority}, errors: length(a.errors) ? [a.errors] : [],
+		profile: {name: opt(a.profile_name), selected: opt(a.profile_selected), pinned: a.profile_pinned == '1'},
+		core_source: (function(p) { return {source: opt(p[0]), channel: opt(p[1]), tag: opt(p[2]), version: opt(p[3])}; })(split(a.core_source ?? '', ':')),
+		warnings: filter(lines(a.warnings), (line) => !match(line, /\[E:dns_raw_lost\]$/) || !!dns_raw_lost(a)), fake_enabled: a.fake_enabled == '1', fake_domains: num(a.fake_domains ?? ''), direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0',
+		geodata: map(lines(a.geodata), (l) => {
+			let f = split(l, ' ');
+			return {file: f[0], asset: f[1] == '1', referenced: f[2] == '1', present: f[3] == '1', size: num(f[4]), mtime: num(f[5])};
+		})
+	};
+	case 'profile':
+		let provider = {};
+		for (let row in lines(a.provider)) { let p = split(row, ' '); provider[p[0]] = p[1]; }
+		return {mode: a.mode, mode_source: a.mode_source, fake_enabled: a.fake_enabled == '1', direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0', dns: a.dns, provider, overrides: override_count(a), targets: lines(a.targets), dns_outbounds: a.dns_outbounds ?? [], dns_raw_lost: dns_raw_lost(a), reserved: lines(a.reserved), provider_lists: a.provider_lists == '1'};
+	case 'diagnostics': return {
+		conflicts: lines(a.conflicts), flash_free_kb: num(a.flash), tmp_xraywrt_kb: num(a.tmp_xraywrt), tmp_free_kb: num(a.tmp_free),
+		ram_available_kb: num(a.ram), xray_rss_kb: num(a.rss),
+		dns_guard_error: a.dns_guard_error || null,
+		config_test: {valid: a.config_valid, output: lines(a.config_output)}
+	};
+	case 'logs': return {available: a.available ?? true, lines: lines(a.l)};
+	case 'metadata': return {
+		profile_title: a.title ?? '', announce: a.announce ?? '', support_url: a.support ?? '', web_page_url: a.web ?? '',
+		header_interval: num(a.interval ?? ''), upload: num(a.upload ?? ''), download: num(a.download ?? ''), total: num(a.total ?? ''), expire: num(a.expire ?? '')
+	};
+	case 'subscription': return merge(merge(a.meta, a.usage ?? {}), {url: a.url, auto_update: a.auto != '0', effective_interval: num(a.effective), config_backup: a.backup, last_update: num(a.updated),
+		active: a.active ?? '',
+		subscriptions: map(a.subscriptions ?? [], (i) => i.id == a.active
+			? merge(i, {active: true, updated: num(a.updated), meta: merge(i.meta, a.usage ?? {})})
+			: merge(i, {active: false, updated: num(i.updated)}))});
+	default: die('Unknown JSON shape: ' + shape);
+	}
+}
+let cmd = shift(ARGV);
+try {
+	switch (cmd) {
+	case 'build':
+	case 'merge': {
+		let shape = shift(ARGV), a = {}, path;
+		// Raw list files must not all reside in memory alongside the encoded object.
+		if (cmd == 'build' && shape == 'object' && length(ARGV) && length(ARGV) % 3 == 0) {
+			let files = {}, only_files = true;
+			for (let i = 0; i < length(ARGV); i += 3) {
+				if (ARGV[i] != '--rawfile') { only_files = false; break; }
+				files[ARGV[i + 1]] = ARGV[i + 2];
+			}
+			if (only_files) {
+				let separator = '';
+				print('{');
+				for (let key, file in files) {
+					print(separator, encode(key), ':');
+					emit_rawfile(file);
+					separator = ',';
+				}
+				print('}\n');
+				break;
+			}
+		}
+		while (length(ARGV)) {
+			let flag = shift(ARGV);
+			if (flag != '--arg' && flag != '--argjson' && flag != '--rawfile') { path = flag; break; }
+			let key = shift(ARGV), value = shift(ARGV);
+			if (key == null || value == null) die('Missing JSON argument');
+			a[key] = flag == '--argjson' ? parse(value) : flag == '--rawfile' ? read(value) : value;
+		}
+		let value = build(shape, a);
+		emit(cmd == 'merge' ? merge(parse(read(path)), value) : value, shape == 'config' || shape == 'runtime');
+		break;
+	}
+	case 'get': {
+		let fields = split(shift(ARGV), ':'), empty = ARGV[0] == 'empty';
+		if (empty) shift(ARGV);
+		let obj = parse(read(shift(ARGV)));
+		print(join(':', map(fields, (k) => raw(empty ? fallback(obj[k], '') : obj[k]))), '\n');
+		break;
+	}
+	case 'object': {
+		let obj = parse(read(shift(ARGV)));
+		if (type(obj) == 'object') emit(obj);
+		break;
+	}
+	case 'history': {
+		let action = shift(ARGV), jobs = [];
+		if (action == 'sort') {
+			for (let path in ARGV) push(jobs, parse(read(path)));
+			sort(jobs, (a, b) => {
+				let av = [a.started, ...map(split(a.id, '-'), num)], bv = [b.started, ...map(split(b.id, '-'), num)];
+				for (let i = 0; i < length(av); i++) if (numeric(av[i]) != numeric(bv[i])) return numeric(av[i]) < numeric(bv[i]) ? -1 : 1;
+				return 0;
+			});
+			emit(jobs, true);
+		} else {
+			let s = read();
+			if (!length(trim(s))) break;
+			jobs = parse(s);
+			if (action == 'last') print(raw(fallback(jobs[-1]?.id, '')), '\n');
+			else if (action == 'prune') for (let j in slice(filter(jobs, (j) => j.state != 'running'), 0, -5)) print(raw(j.id), '\n');
+			else die('Unknown history operation');
+		}
+		break;
+	}
+	case 'outbound-delta': {
+		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
+		let delta = gen.outbound_delta(parse(read(shift(ARGV))), parse(read(shift(ARGV))));
+		let dst = shift(ARGV), removed = shift(ARGV);
+		if (length(delta.add) && writefile(dst, encode({outbounds: delta.add}) + '\n') == null) die('Cannot write ' + dst);
+		if (length(delta.remove) && writefile(removed, encode({outbounds: map(delta.remove, (tag) => ({tag}))}) + '\n') == null) die('Cannot write ' + removed);
+		break;
+	}
+	case 'diff': {
+		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
+		print(gen.diff_sections(parse(read(shift(ARGV))), parse(read(shift(ARGV)))), '\n');
+		break;
+	}
+	case 'geodata-refs': {
+		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
+		for (let file in gen.geodata_files(parse(read(shift(ARGV))))) print(file, '\n');
+		break;
+	}
+	case 'gen': {
+		// gen <src> <dst> <params.json>: runtime config and <dst>.profile (spec 6.1).
+		let src = shift(ARGV), dst = shift(ARGV), params = parse(read(shift(ARGV)));
+		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
+		let text = readfile(src);
+		if (text == null) die(gen.code_message('config_missing', 'config: cannot read %s', src));
+		let result = gen.generate(text, params, {parse, readfile});
+		if (writefile(dst + '.profile', join('', map(result.profile, (l) => l + '\n'))) == null ||
+			writefile(dst, encode(result.config, true) + '\n') == null) die('Cannot write ' + dst);
+		break;
+	}
+	case 'observatory-target': {
+		let target = parse(read()).balancer?.principleTarget;
+		// the core omits an empty tag list: {"principleTarget":{}}.
+		let tags = type(target) == 'object' ? (target.tag ?? []) : null;
+		if (type(tags) != 'array' || length(filter(tags, (t) => type(t) != 'string'))) die('Invalid observatory targets');
+		print(length(filter(tags, (t) => t != '')) ? 'live\n' : 'empty\n');
+		break;
+	}
+	case 'balancers': {
+		let op = shift(ARGV);
+		if (op == 'overrides') {
+			// UCI show: shell-quoted list items, never evaluated as shell code.
+			let text = trim(read()), value = '', quoted = false, escape = false;
+			text = substr(text, index(text, '=') + 1);
+			for (let c in split(text + ' ', '')) {
+				if (escape) { value += c; escape = false; }
+				else if (c == "'") quoted = !quoted;
+				else if (c == '\\' && !quoted) escape = true;
+				else if (c == ' ' && !quoted) {
+					if (value != '') {
+						if (index(value, '\x00') >= 0 || match(value, /[[:cntrl:]]/)) die('Invalid balancer override');
+						print(value, '\n'); value = '';
+					}
+				} else value += c;
+			}
+			if (quoted || escape) die('Invalid balancer override');
+			break;
+		}
+		if (op == 'override') {
+			// bi JSON on stdin: the live override target, '' = none.
+			let info = parse(read()).balancer;
+			if (type(info) != 'object') die('Invalid balancer API response');
+			print(info.override?.target ?? '', '\n');
+			break;
+		}
+		let cfg = parse(read(shift(ARGV)));
+		let catalog = map(cfg.routing?.balancers ?? [], (b) => ({
+			tag: b.tag, selector: b.selector ?? [], fallback: b.fallbackTag ?? null,
+			// tag=target in UCI cannot hold a tag with '=' (spec 16).
+			settable: type(b.tag) == 'string' && index(b.tag, '=') < 0,
+			targets: map(filter(cfg.outbounds ?? [], (o) => type(o.tag) == 'string' &&
+				length(filter(b.selector ?? [], (p) => substr(o.tag, 0, length(p)) == p))), (o) => o.tag)
+		}));
+		if (op == 'list') {
+			// Rows on stdin, saved `tag=target` overrides as arguments.
+			let saved = {}, stale = [];
+			for (let e in ARGV) {
+				let i = index(e, '='), t = i < 0 ? e : substr(e, 0, i);
+				if (t in saved) continue;
+				saved[t] = i < 0 ? null : substr(e, i + 1);
+				if (!length(filter(catalog, (b) => b.tag == t))) push(stale, {tag: t, target: saved[t]});
+			}
+			let rows = map(lines(read()), parse);
+			for (let r in rows) {
+				r.saved = saved[r.tag] ?? null;
+				r.stale = r.saved != null && r.error == null && r.saved != r.override;
+			}
+			emit({running: true, balancers: rows, stale});
+			break;
+		}
+		let tag = shift(ARGV), target = shift(ARGV);
+		if (op == 'tags') {
+			for (let b in catalog) {
+				if (type(b.tag) != 'string' || index(b.tag, '\x00') >= 0 || match(b.tag, /[[:cntrl:]]/)) die('Invalid balancer tag');
+				print(b.tag, '\n');
+			}
+			break;
+		}
+		let b = filter(catalog, (b) => b.tag == tag)[0];
+		if (b == null) die('balancer "' + tag + '" not found');
+		if (op == 'check') {
+			if (index(tag, '=') >= 0 || index(tag, '\x00') >= 0 || index(target, '\x00') >= 0 || match(tag + target, /[[:cntrl:]]/)) die('Invalid balancer override');
+			if (target != '' && !(target in b.targets)) die('balancer "' + tag + '": target "' + target + '" not found');
+		} else if (op == 'info') {
+			let info = parse(read()).balancer;
+			if (type(info) != 'object') die('Invalid balancer API response');
+			b.override = info.override?.target ?? null;
+			b.selected = info.principleTarget?.tag ?? [];
+			emit(b);
+		} else if (op == 'error') {
+			b.override = null;
+			b.selected = [];
+			b.error = target;
+			emit(b);
+		} else die('Unknown balancer operation: ' + op);
+		break;
+	}
+	case 'dns-outbounds': {
+		let src = shift(ARGV), want = shift(ARGV) ?? '';
+		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
+		let text = readfile(src);
+		if (text == null) die(gen.code_message('config_missing', 'config: cannot read %s', src));
+		print(encode(gen.dns_outbounds(text, want, {parse})), '\n');
+		break;
+	}
+	case 'profiles': {
+		// profiles <src>: JSON list of the profile names (spec 5.3).
+		let src = shift(ARGV);
+		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
+		let text = readfile(src);
+		if (text == null) die(gen.code_message('config_missing', 'config: cannot read %s', src));
+		print(encode(gen.profiles(text, {parse})), '\n');
+		break;
+	}
+	case 'rules': {
+		// rules <check|entries|urls> <file> [direct|proxy]: My rules (spec 11). The
+		// valid target tags of the configuration come on stdin, one per line.
+		let op = shift(ARGV), file = shift(ARGV);
+		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
+		let text = readfile(file) ?? '', tags = op == 'urls' ? [] : lines(read());
+		if (op == 'check') {
+			for (let e in gen.check_rules(text, tags)) print(e.line, '\t', e.code, '\t', e.target || '-', '\t', e.text, '\n');
+		} else if (op == 'entries') {
+			for (let v in gen.rule_addresses(text, tags, shift(ARGV) == 'direct')) print(v, '\n');
+		} else if (op == 'routed-urls') {
+			for (let v in gen.rule_routed_urls(text, tags)) print(v, '\n');
+		} else if (op == 'urls') {
+			for (let v in gen.rule_urls(text)) print(v, '\n');
+		} else die('Unknown rules operation: ' + op);
+		break;
+	}
+	case 'pairs': {
+		// stdin "key<TAB>value" lines -> JSON object.
+		let obj = {};
+		for (let l in lines(read())) {
+			let i = index(l, '\t');
+			if (i > 0) obj[substr(l, 0, i)] = substr(l, i + 1);
+		}
+		print(encode(obj), '\n');
+		break;
+	}
+	case 'lines': {
+		// stdin lines -> JSON array of the non-empty ones.
+		print(encode(lines(read())), '\n');
+		break;
+	}
+	case 'result': {
+		let s = trim(read(shift(ARGV)));
+		emit(length(s) ? parse(s) : null);
+		break;
+	}
+	case 'base64': {
+		let s = b64dec(trim(read()));
+		if (s != null && length(s) && valid_utf8(s) && index(s, '\x00') < 0 && index(s, '�') < 0) print(s, '\n');
+		break;
+	}
+	case 'assets': {
+		// assets <release.json>: name, url, digest, size of every asset, tab-separated.
+		let obj = parse(read(shift(ARGV)));
+		for (let a in fallback(obj.assets, [])) print(raw(a.name), '\t', raw(a.browser_download_url), '\t', raw(fallback(a.digest, '')), '\t', raw(fallback(a.size, '')), '\n');
+		break;
+	}
+	default: { die('Unknown JSON operation: ' + cmd);
+	}
+	}
+} catch (e) {
+	warn('xraywrt-json: ', e.message ?? e, '\n');
+	exit(1);
+}

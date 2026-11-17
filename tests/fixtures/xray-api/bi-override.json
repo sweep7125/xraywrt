@@ -1,0 +1,13 @@
+{
+    "balancer": {
+        "override": {
+            "target": "node-b"
+        },
+        "principleTarget": {
+            "tag": [
+                "node-a",
+                "node-b"
+            ]
+        }
+    }
+}

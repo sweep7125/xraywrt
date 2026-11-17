@@ -1,0 +1,167 @@
+#!/bin/ash
+
+# HTTP fetch with size/time limits, device headers and GitHub tags.
+
+# --- device identity (stable across upgrades: the stored value wins) -------
+
+device_hwid() {
+	local file="$PKG_PERSIST_DIR/hwid" hwid="" material="" path="" mac=""
+
+	hwid="$(head -n 1 "$file" 2>/dev/null | tr -d ' \r')"
+	case "$hwid" in
+	'' | *[!0-9a-f]*) ;;
+	*)
+		[ "${#hwid}" -eq 16 ] || [ "${#hwid}" -eq 64 ] && {
+			echo "$hwid"
+			return 0
+		}
+		;;
+	esac
+
+	for path in /sys/firmware/devicetree/base/serial-number /proc/device-tree/serial-number \
+		/sys/class/dmi/id/product_uuid /sys/class/dmi/id/board_serial /sys/class/dmi/id/product_serial; do
+		[ -r "$path" ] || continue
+		material="$(tr -d '\000-\037' <"$path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+		case "$(echo "$material" | tr '[:upper:]' '[:lower:]')" in
+		'' | 0 | unknown | none | unset | 00000000-0000-0000-0000-000000000000) material="" ;;
+		*)
+			material="serial:$material"
+			break
+			;;
+		esac
+	done
+	if [ -z "$material" ]; then
+		material="$(for path in /sys/class/net/*/address; do
+			[ "${path%/address}" = /sys/class/net/lo ] && continue
+			mac="$(tr '[:upper:]' '[:lower:]' <"$path" 2>/dev/null)"
+			case "$mac" in
+			00:00:00:00:00:00 | ff:ff:ff:ff:ff:ff | *[!0-9a-f:]*) ;;
+			??:??:??:??:??:??) echo "$mac" ;;
+			esac
+		done | sort -u | awk 'NF { printf "%s%s", s, $0; s = "," }')"
+		[ -z "$material" ] || material="macs:$material"
+	fi
+	if [ -n "$material" ]; then
+		hwid="$(printf 'xraywrt-hwid-v1\n%s\n' "$material" | sha256sum | cut -c1-16)"
+	else
+		hwid="$(hexdump -n 8 -v -e '/1 "%02x"' /dev/urandom)"
+	fi
+	ensure_dir "$PKG_PERSIST_DIR" && (umask 077 && echo "$hwid" >"$file")
+	echo "$hwid"
+}
+
+device_model() {
+	local path=""
+
+	for path in /tmp/sysinfo/model /sys/firmware/devicetree/base/model /tmp/sysinfo/board_name; do
+		[ -r "$path" ] && {
+			tr -d '\000-\037' <"$path"
+			return 0
+		}
+	done
+	echo unknown
+}
+
+device_os_version() {
+	sed -n "s/^DISTRIB_RELEASE='\(.*\)'$/\1/p" "$OPENWRT_RELEASE_FILE" 2>/dev/null | head -n 1
+}
+
+# --- HTTP ------------------------------------------------------------------
+
+# http_fetch <url> <out> <max_bytes> <timeout_seconds|core|geodata> <device_headers 0|1> [headers_file]
+# Sets FETCH_ERROR (network|too_large|http_<code>|invalid_url), FETCH_HTTP_STATUS
+# and FETCH_HDR (the explicit headers_file, otherwise empty).
+http_fetch() {
+	local url="$1" out="$2" max="$3" timeout="$4" device="${5:-0}" headers="${6:-}" size="" rc=0
+
+	FETCH_ERROR=""
+	FETCH_HTTP_STATUS=""
+	# Per process: downloads run without the lock and may overlap.
+	FETCH_HDR="$headers"
+	[ -n "$headers" ] || headers="$PKG_TMP_DIR/fetch.headers.$$"
+	is_http_url "$url" || {
+		FETCH_ERROR=invalid_url
+		return 1
+	}
+	ensure_dir "$PKG_TMP_DIR" || return 1
+	: >"$headers"
+	set -- -fsSLg --proto '=https,http' --proto-redir '=https' --max-redirs 5 \
+		--max-filesize "$max" --connect-timeout 15 \
+		-A "xraywrt/$PKG_VERSION"
+	case "$timeout" in
+	core) set -- "$@" --speed-limit 2048 --speed-time 60 --retry 2 ;;
+	# Geodata runs under the runtime lock: a slow server must not hold it for ever.
+	# No --retry: the cap is per attempt and the caller already tries every route.
+	geodata) set -- "$@" --speed-limit 2048 --speed-time 60 --max-time 1800 ;;
+	*) set -- "$@" --max-time "$timeout" ;;
+	esac
+	# Subscriptions ask for Xray JSON (spec 5.3).
+	[ "$device" != 1 ] || set -- "$@" -H "Accept: application/json"
+	# Device headers identify the router to the provider; only over HTTPS.
+	case "$device:$url" in
+	1:https://*)
+		set -- "$@" -H "x-hwid: $(device_hwid)" -H "x-device-os: OpenWrt" \
+			-H "x-ver-os: $(device_os_version)" -H "x-device-model: $(device_model)"
+		;;
+	esac
+	curl "$@" -D "$headers" -o "$out" "$url" 2>/dev/null || rc=$?
+	FETCH_HTTP_STATUS="$(awk '/^HTTP\// { s = $2 } END { print s }' "$headers" 2>/dev/null)"
+	[ -n "$FETCH_HDR" ] || rm -f "$headers"
+	size=""
+	[ -f "$out" ] && size="$(wc -c <"$out" | tr -d ' ')"
+	if [ "$rc" -eq 63 ] || { is_uint "$size" && [ "$size" -gt "$max" ]; }; then
+		FETCH_ERROR=too_large
+	elif [ "$rc" -eq 22 ]; then
+		FETCH_ERROR="http_$FETCH_HTTP_STATUS"
+	elif [ "$rc" -ne 0 ]; then
+		FETCH_ERROR=network
+	fi
+	[ -z "$FETCH_ERROR" ] && return 0
+	rm -f "$out"
+	return 1
+}
+
+# check-ip: the router's own exit address (the browser may use another VPN).
+# Prints {"ip": ..., "country": ...} or fails with a coded error.
+check_ip_json() {
+	local body="$PKG_TMP_DIR/check-ip.$$" ip="" country=""
+
+	ensure_dir "$PKG_TMP_DIR" || return 1
+	if http_fetch https://ipinfo.io/json "$body" 4096 10 0; then
+		ip="$(xraywrt-json get ip empty "$body" 2>/dev/null)"
+		country="$(xraywrt-json get country empty "$body" 2>/dev/null)"
+	fi
+	rm -f "$body"
+	case "$ip" in '' | *[!0-9A-Fa-f:.]*) ip="" ;; esac
+	case "$country" in [A-Za-z][A-Za-z]) ;; *) country="" ;; esac
+	[ -n "$ip" ] && [ -n "$country" ] || {
+		err_code check_ip 'Could not check: the check site is unavailable.'
+		return 1
+	}
+	xraywrt-json build object --arg ip "$ip" --arg country "$country"
+}
+
+# github_routes <url>: <url>, then a https://github.com/ URL behind each
+# GITHUB_PROXIES host (spec 4.1). Only for bodies checked against a hash.
+github_routes() {
+	local proxy=""
+
+	printf '%s\n' "$1"
+	case "$1" in https://github.com/*) ;; *) return 0 ;; esac
+	for proxy in $GITHUB_PROXIES; do
+		printf 'https://%s/%s\n' "$proxy" "$1"
+	done
+}
+
+# Latest release tag without the GitHub API (blocked or rate-limited):
+# github.com redirects /releases/latest to /releases/tag/<tag>.
+github_latest_tag() {
+	local url=""
+
+	url="$(curl -fsS -o /dev/null --connect-timeout 15 --max-time 30 \
+		-w '%{redirect_url}' "https://github.com/$1/releases/latest" 2>/dev/null)" || return 1
+	case "$url" in
+	*/releases/tag/?*) echo "${url##*/releases/tag/}" ;;
+	*) return 1 ;;
+	esac
+}

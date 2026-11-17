@@ -1,0 +1,12 @@
+# whitelist
+geosite:youtube core
+Example.COM core
+  full:api.example.org  core # inline
+regexp:^cdn[0-9]+\.example\.net$ core
+keyword:tracker core
+
+ext:extra.dat:video core
+foo:bar core
+bad host core
+ext:nodat core
+domain: core

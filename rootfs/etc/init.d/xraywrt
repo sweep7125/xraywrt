@@ -1,0 +1,70 @@
+#!/bin/sh /etc/rc.common
+# XRAYWRT_PACKAGE_HARDEN_PATH
+
+START=21
+STOP=79
+USE_PROCD=1
+
+# Do not pass a caller's runtime lock to procd or its supervisor.
+exec 9>&-
+
+. /usr/lib/xraywrt/constants.sh
+XRAYWRT_CLI="${SUPERVISOR_CMD% *}"
+
+# Validate everything first so a bad config never touches router state.
+start_service() {
+	local skip=""
+
+	# Set by the package preinst for the start that apk's default postinst
+	# runs. A marker left by a failed install must not block a later Start.
+	if [ -f "$SKIP_START_FILE" ]; then
+		skip="$(find "$SKIP_START_FILE" -mmin -5 2>/dev/null)"
+		rm -f "$SKIP_START_FILE"
+		[ -z "$skip" ] || return 0
+	fi
+	(umask 077 && mkdir -p "$PKG_STATE_DIR") || return 1
+	if [ "${XRAYWRT_UPDATE_CONTROL:-}" = 1 ]; then
+		[ ! -f "$USER_STOP_FILE" ] || return 0
+	else
+		rm -f "$USER_STOP_FILE"
+	fi
+	rm -f "$LAST_ERROR_FILE" "$HEALTH_FILE" "$DEGRADED_FILE" "$CONFIG_INVALID_FILE"
+	# prepare records its error in LAST_ERROR_FILE; warnings stay quiet.
+	"$XRAYWRT_CLI" prepare 2>/dev/null || {
+		cat "$LAST_ERROR_FILE" >&2
+		logger -p daemon.err -t xraywrt "Start aborted: configuration is not valid: $(cat "$LAST_ERROR_FILE" 2>/dev/null)"
+		return 1
+	}
+
+	[ "${XRAYWRT_UPDATE_CONTROL:-}" != 1 ] || [ ! -f "$USER_STOP_FILE" ] || return 0
+	procd_open_instance
+	# The fixed command in constants.sh intentionally expands to two arguments.
+	# shellcheck disable=SC2086
+	procd_set_param command $SUPERVISOR_CMD
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	# Watchdog or crash: retry every 5 s. A run shorter than 300 s counts as a
+	# failure; 5 in a row stop the retries, a longer run resets the count.
+	procd_set_param respawn 300 5 5
+	# Cleanup (DNS, nft, routes) must finish before procd escalates to SIGKILL.
+	procd_set_param term_timeout 30
+	procd_close_instance
+}
+
+stop_service() {
+	[ "${XRAYWRT_UPDATE_CONTROL:-}" = 1 ] ||
+		{ (umask 077 && mkdir -p "${USER_STOP_FILE%/*}") && : >"$USER_STOP_FILE"; }
+}
+
+# Make stop synchronous and clear leftovers if run-service was killed.
+service_stopped() {
+	"$XRAYWRT_CLI" wait-stopped >/dev/null 2>&1
+}
+
+reload_service() {
+	"$XRAYWRT_CLI" reload
+}
+
+service_triggers() {
+	procd_add_reload_trigger "xraywrt" "dhcp"
+}

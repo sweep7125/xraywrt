@@ -1,0 +1,21 @@
+#!/bin/sh
+
+. /usr/lib/xraywrt/constants.sh
+
+# WAN came up: refresh DNS bypass and connected networks, or restart an
+# enabled service that procd gave up on (e.g. watchdog during a long outage).
+# Invalid configuration blocks auto-start until the config changes or Start.
+# A service stopped by the user (Stop) stays stopped until Start or reboot.
+case "$ACTION" in
+ifup | ifupdate) ;;
+*) exit 0 ;;
+esac
+[ "$INTERFACE" = loopback ] && exit 0
+
+if [ -f "$RUNNING_MARKER" ] || pgrep -f "$SUPERVISOR_PATTERN" >/dev/null 2>&1; then
+	/usr/bin/xraywrt net-refresh 6>&- 9>&- >/dev/null 2>&1 &
+elif [ "$ACTION" = ifup ] && [ ! -f "$USER_STOP_FILE" ] &&
+	{ [ ! -f "$CONFIG_INVALID_FILE" ] || [ "$XRAY_CONFIG" -nt "$CONFIG_INVALID_FILE" ] ||
+		[ /etc/config/xraywrt -nt "$CONFIG_INVALID_FILE" ]; } && /etc/init.d/xraywrt enabled 6>&- 9>&-; then
+	/etc/init.d/xraywrt start 6>&- 9>&- >/dev/null 2>&1 &
+fi

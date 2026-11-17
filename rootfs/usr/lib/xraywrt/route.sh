@@ -1,0 +1,120 @@
+#!/bin/ash
+
+# Policy routing: packets with the intercept mark are delivered locally so the
+# TPROXY socket can take them. Table id and rule priority are picked from free
+# ranges and remembered in $ROUTE_STATE_FILE for cleanup.
+
+route_families() {
+	echo 4
+	route_ipv6_enabled && echo 6
+	return 0
+}
+
+route_state_read() {
+	ROUTE_TABLE=""
+	ROUTE_PRIORITY=""
+	[ -r "$ROUTE_STATE_FILE" ] || return 1
+	ROUTE_TABLE="$(sed -n 's/^TABLE=//p' "$ROUTE_STATE_FILE")"
+	ROUTE_PRIORITY="$(sed -n 's/^PRIORITY=//p' "$ROUTE_STATE_FILE")"
+	is_uint "$ROUTE_TABLE" && is_uint "$ROUTE_PRIORITY"
+}
+
+# Print the first value in [min,max] that does not appear in the used list.
+route_first_free() {
+	local min="$1" max="$2" used="$3" value="$1"
+
+	while [ "$value" -le "$max" ]; do
+		case " $used " in
+		*" $value "*) ;;
+		*)
+			echo "$value"
+			return 0
+			;;
+		esac
+		value=$((value + 1))
+	done
+	return 1
+}
+
+route_allocate() {
+	local fam="" used_tables="" used_prios="" file=""
+
+	# ip-full prints table names, so reserve every configured id as well.
+	used_tables="$(for file in /etc/iproute2/rt_tables /etc/iproute2/rt_tables.d/*.conf; do
+		[ ! -r "$file" ] || awk '$1 ~ /^[0-9]+$/ { print $1 }' "$file"
+	done | tr '\n' ' ')"
+	for fam in $(route_families); do
+		used_tables="$used_tables $(ip -"$fam" route show table all 2>/dev/null | sed -n 's/.* table \([0-9]*\).*/\1/p' | sort -u | tr '\n' ' ')"
+		used_tables="$used_tables $(ip -"$fam" rule show 2>/dev/null | sed -n 's/.* lookup \([0-9]*\).*/\1/p' | tr '\n' ' ')"
+		used_prios="$used_prios $(ip -"$fam" rule show 2>/dev/null | sed -n 's/^\([0-9]*\):.*/\1/p' | tr '\n' ' ')"
+	done
+	ROUTE_TABLE="$(route_first_free "$ROUTE_TABLE_ID_AUTO_MIN" "$ROUTE_TABLE_ID_AUTO_MAX" "$used_tables")" || {
+		err "No free routing table id in $ROUTE_TABLE_ID_AUTO_MIN-$ROUTE_TABLE_ID_AUTO_MAX"
+		return 1
+	}
+	ROUTE_PRIORITY="$(route_first_free "$ROUTE_RULE_PRIORITY_AUTO_MIN" "$ROUTE_RULE_PRIORITY_AUTO_MAX" "$used_prios")" || {
+		err "No free ip rule priority in $ROUTE_RULE_PRIORITY_AUTO_MIN-$ROUTE_RULE_PRIORITY_AUTO_MAX"
+		return 1
+	}
+}
+
+route_setup() {
+	settings_require || return 1
+	# Stop may have given up on the lock and cleaned up unlocked: a late job
+	# must not bring the policy routing back.
+	[ ! -f "$USER_STOP_FILE" ] || return 1
+
+	local fam="" mark="$NFT_INTERCEPT_MARK" added=0
+
+	if route_state_read; then
+		if [ "$ROUTE_PRIORITY" -lt "$ROUTE_RULE_PRIORITY_AUTO_MIN" ] || [ "$ROUTE_PRIORITY" -gt "$ROUTE_RULE_PRIORITY_AUTO_MAX" ]; then
+			route_cleanup
+			route_allocate || return 1
+		fi
+	else
+		route_allocate || return 1
+	fi
+	ensure_dir "$(dirname "$ROUTE_STATE_FILE")" || return 1
+	printf 'TABLE=%s\nPRIORITY=%s\n' "$ROUTE_TABLE" "$ROUTE_PRIORITY" >"$ROUTE_STATE_FILE" || return 1
+	for fam in $(route_families); do
+		ip -"$fam" route replace local default dev lo table "$ROUTE_TABLE" || {
+			err "Failed to add IPv$fam local route to table $ROUTE_TABLE"
+			return 1
+		}
+		route_rule_present "$fam" && continue
+		added=1
+		ip -"$fam" rule del fwmark "$mark/$mark" lookup "$ROUTE_TABLE" priority "$ROUTE_PRIORITY" 2>/dev/null || true
+		ip -"$fam" rule add fwmark "$mark/$mark" lookup "$ROUTE_TABLE" priority "$ROUTE_PRIORITY" || {
+			err "Failed to add IPv$fam policy rule"
+			return 1
+		}
+	done
+	# net_refresh re-runs this on every network change; log only real changes.
+	[ "$added" = 0 ] || log "Policy routing: mark $mark -> table $ROUTE_TABLE (priority $ROUTE_PRIORITY)"
+}
+
+route_cleanup() {
+	local fam=""
+
+	route_state_read || return 0
+	for fam in 4 6; do
+		while ip -"$fam" rule del fwmark "$NFT_INTERCEPT_MARK/$NFT_INTERCEPT_MARK" lookup "$ROUTE_TABLE" priority "$ROUTE_PRIORITY" 2>/dev/null; do :; done
+		# Some BusyBox ip builds flush IPv6 tables without removing anything (defensive).
+		ip -"$fam" route del local default dev lo table "$ROUTE_TABLE" 2>/dev/null
+		ip -"$fam" route flush table "$ROUTE_TABLE" 2>/dev/null
+	done
+	rm -f "$ROUTE_STATE_FILE"
+	log "Policy routing removed (table $ROUTE_TABLE)"
+}
+
+# BusyBox/ip-tiny lack "ip rule show priority N", so match the listing.
+route_rule_present() {
+	local mark=""
+
+	mark="$(printf '%x' "$((NFT_INTERCEPT_MARK))")"
+	ip -"$1" rule show 2>/dev/null | grep -qE "^$ROUTE_PRIORITY:[[:space:]].*fwmark 0x0*$mark(/0x0*$mark)?([[:space:]]|$)"
+}
+
+route_active() {
+	route_state_read && route_rule_present 4
+}
