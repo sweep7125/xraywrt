@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM alpine:3.24
+FROM node:26-alpine
 
 LABEL maintainer="XrayWRT Maintainers"
 LABEL description="Native test runner container for XrayWRT"
@@ -13,7 +13,6 @@ RUN apk add --no-cache \
     jq \
     ucode \
     make \
-    nodejs \
     sed \
     shellcheck
 
@@ -21,13 +20,13 @@ RUN apk add --no-cache \
 # (`run -test`). TARGETARCH is unset by the classic builder: uname -m then. Test environment only: the product has no default geodata
 # sources and no bundled core.
 ARG TARGETARCH
-ARG XRAY_TEST_TAG=v26.11.1-1424
-ARG GEOIP_TAG=202610050438
-ARG GEOSITE_TAG=20261101074624
+ARG XRAY_TEST_TAG=v26.11.10-1249
+ARG GEOIP_TAG=202611080027
+ARG GEOSITE_TAG=20261116043813
 RUN set -eu; \
     case "${TARGETARCH:-$(uname -m)}" in \
-    amd64 | x86_64) asset=Xray-linux-64; sha=8f7a001bc40c784f13608fcf06ba50605adbe0984066949be2db37b1c3166e9b ;; \
-    arm64 | aarch64) asset=Xray-linux-arm64-v8a; sha=9f26c90d95dc336cde2308235380bf72ac57fca3f95d929e147723b98f53b0dd ;; \
+    amd64 | x86_64) asset=Xray-linux-64; sha=ece0cc805e063729a9a0fd3ee5e65b4a00c8e803daf5d1aed3fba7ea44d31ed3 ;; \
+    arm64 | aarch64) asset=Xray-linux-arm64-v8a; sha=4fce6e8fba0d21a0e34e7beb24685bbd7a71f367fd426b877b9e3e0106139c18 ;; \
     *) echo "unsupported architecture ${TARGETARCH:-$(uname -m)}" >&2; exit 1 ;; \
     esac; \
     wget -q -O /usr/local/bin/xray-test "https://github.com/Jolymmiles/Xray-core/releases/download/$XRAY_TEST_TAG/$asset"; \
@@ -37,8 +36,8 @@ RUN set -eu; \
     wget -q -O /usr/local/share/xray-test/geoip.dat "https://github.com/v2fly/geoip/releases/download/$GEOIP_TAG/geoip.dat"; \
     wget -q -O /usr/local/share/xray-test/geosite.dat "https://github.com/v2fly/domain-list-community/releases/download/$GEOSITE_TAG/dlc.dat"; \
     printf '%s  %s\n' \
-        4ff4b2ec242a9e87b296ba27ddb85f8311e8d3e071eaebac5be9231c60e408dd /usr/local/share/xray-test/geoip.dat \
-        64f213e84d75f7fddf43b9a75f5afcce09f07124cce592e458cbbfa045906aa8 /usr/local/share/xray-test/geosite.dat | sha256sum -c -
+        eedb24b3b9fcba27e06b92c0428dab90d9496083091ae4cf39e11387fd99d0e2 /usr/local/share/xray-test/geoip.dat \
+        c449116a9ad4cf406a31c23ff254b94f4d341db0c2d5ad2924410daa62b4277b /usr/local/share/xray-test/geosite.dat | sha256sum -c -
 
 WORKDIR /workspace
 

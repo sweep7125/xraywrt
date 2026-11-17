@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM --platform=linux/amd64 ubuntu:24.04
+FROM --platform=linux/amd64 node:26-slim AS node
+FROM --platform=linux/amd64 ubuntu:26.04
 
 LABEL maintainer="XrayWRT Maintainers"
 LABEL description="Official OpenWrt 25.12.6 SDK and Linux test container for XrayWRT"
@@ -27,7 +28,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libncurses-dev \
     libssl-dev \
     make \
-    nodejs \
     patch \
     pkg-config \
     python3 \
@@ -42,6 +42,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     zstd \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
 
 # Configure git identity for OpenWrt SDK internal init and safe directory handling
 RUN git config --global user.email "builder@xraywrt.local" && \
