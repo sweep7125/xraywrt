@@ -62,9 +62,12 @@ Release actions require explicit approval to tag, push and publish:
    git tag vX && git push origin vX
    ```
    Replace X with `PKG_VERSION`. A tag push triggers the workflow; it is not just
-   a build check. `workflow_dispatch` builds and inspects without publishing.
-3. GitHub runners test and build the app APKs, inspect them, and publish an
-   app-only release with `SHA256SUMS`. The workflow does not build the core.
+   a build check. `workflow_dispatch` runs tests, builds and inspects without
+   publishing.
+3. A tag push waits up to 15 minutes for a passing `test` run on the exact
+   tagged commit from a branch push (`main` for stable releases). It does not
+   rerun the suite. GitHub then builds and inspects the app APKs and publishes
+   them with `SHA256SUMS`. The workflow does not build the core.
 4. Build and publish approved core packages separately in `sweep7125/xraywrt-core`,
    with every supported production APK and `SHA256SUMS-core`. Verify assets
    before publication. Retain old releases in both repositories for rollback.

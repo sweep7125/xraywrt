@@ -263,7 +263,41 @@ assert_contains "release.yml has a build job" $'\n  build:' "$release_yml"
 assert_contains "release.yml has a publish job" $'\n  publish:' "$release_yml"
 assert_contains "release.yml publish needs build" "needs: build" "$release_yml"
 assert_contains "release.yml top-level permissions are empty" $'\npermissions: {}' "$release_yml"
-assert_contains "release.yml build job is read-only" $'  build:\n    runs-on: ubuntu-26.04\n    permissions:\n      contents: read' "$release_yml"
+assert_contains "release.yml build job has read-only access to source and CI results" $'  build:\n    runs-on: ubuntu-26.04\n    permissions:\n      contents: read\n      actions: read' "$release_yml"
+assert_contains 'release.yml waits for branch CI on a tag push' $'      - name: Require passing CI\n        if: github.event_name == \'push\'\n        env:\n          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}' "$release_yml"
+assert_contains 'release.yml runs the full suite only on manual dispatch' $'      - name: Run tests\n        if: github.event_name == \'workflow_dispatch\'\n        run: docker run' "$release_yml"
+
+# Exercise the release gate with synthetic Actions responses; never call GitHub.
+gate_script="$(awk '/- name: Require passing CI/{f=1;next} f&&/run: \|/{r=1;next} r&&/^      - name:/{exit} r{sub(/^          /, "");print}' "$RELEASE_YML")"
+for gate_case in wait success failure cancelled missing api-error rc; do
+	gate_rc=0
+	(
+		set -eu
+		GITHUB_REPOSITORY=sweep7125/xraywrt
+		PRERELEASE=0
+		[[ "$gate_case" != rc ]] || PRERELEASE=1
+		git() { [[ "$*" == 'rev-parse HEAD' ]] && printf 'tested-commit\n'; }
+		sleep() { waited=1; }
+		gh() {
+			[[ "$*" == *'/actions/workflows/test.yml/runs'* && "$*" == *'head_sha=tested-commit'* && "$*" == *'event=push'* ]] || return 1
+			if [[ "$gate_case" == rc ]]; then
+				[[ "$*" != *'branch='* ]] || return 1
+			else
+				[[ "$*" == *'branch=main'* ]] || return 1
+			fi
+			case "$gate_case" in
+			wait) [[ "${waited:-0}" == 1 ]] && echo success || echo pending ;;
+			api-error) return 1 ;;
+			rc) echo success ;;
+			*) echo "$gate_case" ;;
+			esac
+		}
+		[[ -n "$gate_script" ]] || exit 1
+		eval "$gate_script"
+	) >/dev/null 2>&1 || gate_rc=$?
+	case "$gate_case" in wait|success|rc) expected_rc=0 ;; *) expected_rc=1 ;; esac
+	assert_eq "release CI gate: $gate_case" "$expected_rc" "$gate_rc"
+done
 assert_contains "release.yml publish job can write" $'    needs: build\n    runs-on: ubuntu-26.04\n    permissions:\n      contents: write' "$release_yml"
 assert_eq "test.yml pins its job runner to ubuntu-26.04" 1 "$(grep -Ec '^    runs-on: ubuntu-26[.]04$' "$TEST_YML" || true)"
 assert_eq "test.yml has one job runner" 1 "$(grep -Ec '^[[:space:]]*runs-on:' "$TEST_YML" || true)"

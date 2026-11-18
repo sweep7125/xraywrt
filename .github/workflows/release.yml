@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: read
+      actions: read
     timeout-minutes: 45
     outputs:
       prerelease: ${{ steps.version.outputs.prerelease }}
@@ -64,6 +65,30 @@ jobs:
             exit 1
           fi
 
+      - name: Require passing CI
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -eu
+          sha="$(git rev-parse HEAD)"
+          set -- -f "head_sha=$sha" -f event=push -f per_page=1
+          if [ "$PRERELEASE" = 0 ]; then
+            set -- "$@" -f branch=main
+          fi
+          echo "Waiting for test workflow on commit $sha."
+          for attempt in $(seq 1 60); do
+            result="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs" "$@" --jq '.workflow_runs[0] | if . == null then "missing" elif .status == "completed" then .conclusion else "pending" end')"
+            case "$result" in
+              success) echo "CI passed for $sha."; exit 0 ;;
+              missing | pending) sleep 15 ;;
+              *) echo "::error::Test workflow for $sha concluded: $result. Rerun the tests before retrying the release."; exit 1 ;;
+            esac
+          done
+          echo "::error::No passing test workflow for $sha after 15 minutes. Push the commit to a branch and let its tests finish before retrying."
+          exit 1
+
       - name: Cache SDK archive
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -74,6 +99,7 @@ jobs:
         run: docker build -t xraywrt-test:local -f Dockerfile.test .
 
       - name: Run tests
+        if: github.event_name == 'workflow_dispatch'
         run: docker run --rm -v "$PWD:/workspace:ro" -w /workspace xraywrt-test:local bash tests/run.sh
 
       - name: Build packages
