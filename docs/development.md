@@ -45,7 +45,8 @@ Do not point VM tests at a real router without explicit approval.
 
 ## Releases
 
-The public app repository is `sweep7125/xraywrt`; the core builder is private.
+The public app repository is `sweep7125/xraywrt`; core packages are published
+in `sweep7125/xraywrt-core`. The core builder remains private.
 `PKG_VERSION` and `PKG_RELEASE` are defined in `Makefile`. Keep the version
 unchanged across release candidates and bump the package revision for each new
 candidate and for changed code before final release. Update the matching
@@ -62,19 +63,15 @@ Release actions require explicit approval to tag, push and publish:
    ```
    Replace X with `PKG_VERSION`. A tag push triggers the workflow; it is not just
    a build check. `workflow_dispatch` builds and inspects without publishing.
-3. GitHub runners test and build the app APKs, inspect them, and create a
-   **draft release** with app packages and `SHA256SUMS`. The workflow does not
-   build the core.
-4. Build and package the approved core separately. Manually upload every
-   supported production core APK and the complete `SHA256SUMS-core` to the
-   same draft release. There is no separate core tag or repository lookup by the
-   router. Verify all assets before publication.
-5. Publish only after approval and only when the stable release is complete.
-   Keep latest pointing to a complete stable release and retain older assets for
-   rollback. Packages are not signed; checksums do not authenticate a release.
+3. GitHub runners test and build the app APKs, inspect them, and publish an
+   app-only release with `SHA256SUMS`. The workflow does not build the core.
+4. Build and publish approved core packages separately in `sweep7125/xraywrt-core`,
+   with every supported production APK and `SHA256SUMS-core`. Verify assets
+   before publication. Retain old releases in both repositories for rollback.
+   Packages are not signed; checksums do not authenticate a release.
 
-For RC testing, `XRAYWRT_RELEASE_URL` selects **app assets only**. Manually
-install the matching core APK from that RC after verifying `SHA256SUMS-core`.
-The installer's `core-update` step still selects the latest stable core; without
-a stable release it cannot install one. The default installer uses the latest
-stable release.
+For RC testing, `XRAYWRT_RELEASE_URL` selects **app assets only**. Core updates
+always select the latest stable core from the separate core repository; RCs are
+not selected by latest. To test a core prerelease, manually verify its
+`SHA256SUMS-core` and install the matching APK. The default installer selects
+latest stable app and core releases independently.

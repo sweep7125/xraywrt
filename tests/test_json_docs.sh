@@ -17,6 +17,7 @@ assert_file_contains "$ROOT_DIR/README.md" '## If internet is lost' 'README has 
 assert_file_contains "$ROOT_DIR/README.ru.md" '## Если пропал интернет' 'README.ru has recovery section'
 assert_file_contains "$ROOT_DIR/docs/user-guide.md" '## If internet is lost' 'user guide has recovery section'
 assert_file_contains "$ROOT_DIR/docs/development.md" 'SHA256SUMS-core' 'release includes core checksums'
-assert_file_contains "$ROOT_DIR/docs/development.md" 'draft release' 'release workflow creates draft'
+assert_file_contains "$ROOT_DIR/docs/development.md" 'sweep7125/xraywrt-core' 'release workflow names core repository'
+assert_file_not_contains "$ROOT_DIR/docs/development.md" 'draft release' 'release workflow publishes app release'
 assert_file_contains "$ROOT_DIR/docs/development.md" 'git tag vX && git push origin vX' 'release tag workflow'
 pass 'JSON docs: recovery and release workflow'

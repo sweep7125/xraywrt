@@ -87,8 +87,10 @@ configuration and lists are retained by the package backup settings.
 Use OpenWrt 25.12 (apk), 256 MB RAM recommended and about 32 MB free flash.
 On the router run `cat /etc/apk/arch` and choose the core APK with exactly that
 architecture. Obtain the app APK, optional Russian translation APK, and core
-APK from a trusted release or local build. For a release, verify `SHA256SUMS`
-and `SHA256SUMS-core` before transfer. Packages are not signed; checksums do not
+APK from a trusted release or local build. App releases are in
+`sweep7125/xraywrt`; core releases are in `sweep7125/xraywrt-core`. Verify
+`SHA256SUMS` and `SHA256SUMS-core` from the respective releases before transfer.
+Latest selects stable releases, not prereleases. Packages are not signed; checksums do not
 authenticate their source.
 
 Copy files to `/tmp`, for example using `scp -O`, then run on the router:

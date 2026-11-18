@@ -16,14 +16,14 @@ http_fetch() {
 	printf '%s\n' "$1" >>"$tmpdir/requests"
 	case "$1" in
 	https://api.github.com/*) FETCH_ERROR=http_403; return 1 ;;
-	"https://github.com/sweep7125/xraywrt/releases/download/$tag/SHA256SUMS-core") printf '%s\n' "$sums_body" >"$2" ;;
+	"https://github.com/sweep7125/xraywrt-core/releases/download/$tag/SHA256SUMS-core") printf '%s\n' "$sums_body" >"$2" ;;
 	*) fail "unexpected fallback request $1" ;;
 	esac
 }
-github_latest_tag() { printf '%s\n' "$tag"; }
+github_latest_tag() { assert_eq sweep7125/xraywrt-core "$1" "fallback repository"; printf '%s\n' "$tag"; }
 core_pkg_resolve || fail "offline resolver: $CORE_ERROR"
 assert_eq "$sha:$asset:" "$CORE_SHA256:$CORE_ASSET:$CORE_SIZE" 'sums identity, unknown compressed size'
-assert_eq "https://github.com/sweep7125/xraywrt/releases/download/$tag/$asset" "$CORE_URL" 'package-only offline URL'
+assert_eq "https://github.com/sweep7125/xraywrt-core/releases/download/$tag/$asset" "$CORE_URL" 'package-only offline URL'
 for sums_body in "bad $asset" "$sha  ../$asset" "$sha  xraywrt-core_1/../2_aarch64_generic.apk" "$sha  $asset
 $sha  $asset"; do
 	if core_pkg_resolve; then fail "malformed or ambiguous sums accepted: $sums_body"; fi

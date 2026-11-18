@@ -161,7 +161,7 @@ function coreMissingCard() {
 	return E('div', { class: 'cbi-section' }, [
 		E('h3', text(_('Xray core is not installed'))),
 		E('p', text(_('XrayWRT needs the Xray core. Download it once from GitHub: about 17 MB on the router with the default core.'))),
-		E('p', text(_('If the router cannot reach GitHub, copy xraywrt-core_*.apk from the XrayWRT release to the router and install it over SSH. The service restarts by itself.'))),
+		E('p', text(_('If the router cannot reach GitHub, copy xraywrt-core_*.apk from the xraywrt-core release to the router and install it over SSH. The service restarts by itself.'))),
 		E('p', [ E('code', {}, text('apk add --allow-untrusted xraywrt-core_*.apk')) ]),
 		E('div', { class: 'mw-row' }, [ !api.readOnly() ? install : '' ])
 	]);

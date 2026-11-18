@@ -9,10 +9,6 @@ const MIB = 1048576;
 // Release size is compressed APK size, not installed flash usage.
 const RAM_MARGIN = 16 * MIB;
 
-function mb(bytes) {
-	return _('%d MB').format(Math.ceil(bytes / MIB));
-}
-
 function coreNotice(res) {
 	if (!res?.updated)
 		return _('Xray core %s is up to date.').format(res?.version || '');
@@ -32,15 +28,13 @@ function coreSection(status, diagnostics) {
 	const result = E('div', { 'aria-live': 'polite' });
 
 	const free = (kb) => typeof kb === 'number' && isFinite(kb) ? kb * 1024 : null;
-	const flash = free(diagnostics?.flash_free_kb), ram = free(diagnostics?.ram_available_kb);
+	const ram = free(diagnostics?.ram_available_kb);
 	const origin = api.coreOrigin(src);
 	// One grid for every fact, so the value column and row gaps are shared.
 	const factRows = () => {
 		const rows = [
 			[ _('Core version'), status.core || _('not installed') ],
-			[ _('Core source'), origin ],
-			[ _('Free flash'), flash == null ? '—' : mb(flash) ],
-			[ _('Free memory'), ram == null ? '—' : mb(ram) ]
+			[ _('Core source'), origin ]
 		];
 
 		return rows;

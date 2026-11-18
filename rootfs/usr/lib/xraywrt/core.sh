@@ -280,13 +280,13 @@ core_update() {
 	core_pkg_update "$rollback"
 }
 
-# Spec 4.5: latest XrayWRT release, asset xraywrt-core_<version>_<arch>.apk
+# Spec 4.5: latest core release, asset xraywrt-core_<version>_<arch>.apk
 # (<arch> = DISTRIB_ARCH: one static binary in a package per aarch64 package
 # architecture), sha256 from the API digest, or without the
 # API from SHA256SUMS-core. Sets CORE_TAG, CORE_ASSET, CORE_URL, CORE_SIZE,
 # CORE_SHA256, CORE_PKG_VERSION; CORE_ERROR on failure.
 core_pkg_resolve() {
-	local json="$CORE_TMP_DIR/release.json" arch="" meta="" digest="" repo="$XRAYWRT_RELEASE_REPO"
+	local json="$CORE_TMP_DIR/release.json" arch="" meta="" digest="" repo="$XRAYWRT_CORE_RELEASE_REPO"
 
 	CORE_TAG="" CORE_ASSET="" CORE_URL="" CORE_SIZE="" CORE_SHA256="" CORE_PKG_VERSION="" CORE_ERROR=""
 	arch="$(openwrt_arch)"
@@ -312,9 +312,8 @@ core_pkg_resolve() {
 			return 1
 		}
 		CORE_ASSET="$(printf '%s' "$meta" | cut -f1)"
-		CORE_URL="$(printf '%s' "$meta" | cut -f2)"
-		digest="$(printf '%s' "$meta" | cut -f3)"
-		CORE_SIZE="$(printf '%s' "$meta" | cut -f4)"
+		digest="$(printf '%s' "$meta" | cut -f2)"
+		CORE_SIZE="$(printf '%s' "$meta" | cut -f3)"
 		is_sha256_hex "${digest#sha256:}" && [ "${digest#sha256:}" != "$digest" ] && CORE_SHA256="${digest#sha256:}"
 	else
 		rm -f "$json"
@@ -336,6 +335,10 @@ core_pkg_resolve() {
 		CORE_ERROR="release $repo@$CORE_TAG has an invalid package version in $CORE_ASSET"
 		return 1
 	}
+	case "$CORE_ASSET" in
+	*[!A-Za-z0-9._+-]*) CORE_ERROR="release $repo@$CORE_TAG has an invalid asset name"; return 1 ;;
+	esac
+	CORE_URL="https://github.com/$repo/releases/download/$CORE_TAG/$CORE_ASSET"
 	case "$CORE_URL" in
 	https://*) ;;
 	*)
@@ -353,7 +356,7 @@ core_pkg_resolve() {
 # redirect, sha256 from the one SHA256SUMS-core line of <arch> (spec 4.5),
 # both directly from github.com; size unknown.
 core_pkg_resolve_direct() {
-	local arch="$1" repo="$XRAYWRT_RELEASE_REPO" api_error="$FETCH_ERROR" sums="$CORE_TMP_DIR/SHA256SUMS-core" lines=""
+	local arch="$1" repo="$XRAYWRT_CORE_RELEASE_REPO" api_error="$FETCH_ERROR" sums="$CORE_TMP_DIR/SHA256SUMS-core" lines=""
 
 	warn "Core update: GitHub API unavailable ($api_error); using github.com"
 	CORE_TAG="$(github_latest_tag "$repo")" || {
@@ -385,7 +388,6 @@ core_pkg_resolve_direct() {
 		;;
 	esac
 	CORE_ASSET="${lines#* }"
-	CORE_URL="https://github.com/$repo/releases/download/$CORE_TAG/$CORE_ASSET"
 	# A bad hash leaves CORE_SHA256 empty: core_pkg_resolve refuses it.
 	! is_sha256_hex "${lines%% *}" || CORE_SHA256="${lines%% *}"
 }
@@ -394,7 +396,7 @@ core_pkg_resolve_direct() {
 # $CORE_TMP_DIR/old.apk, verified by its sha256 (spec 4.5 rollback).
 # Needs MemAvailable > size + 16 MiB. Sets CORE_OLD_ERROR on failure.
 core_pkg_old_fetch() {
-	local fields="" source="" tag="" asset="" sha="" size="" avail="" out="$CORE_TMP_DIR/old.apk"
+	local fields="" source="" tag="" asset="" sha="" size="" avail="" repo="" out="$CORE_TMP_DIR/old.apk"
 
 	CORE_OLD_ERROR=""
 	fields="$(core_json_get source:tag:asset:sha256:size)"
@@ -408,13 +410,17 @@ core_pkg_old_fetch() {
 		CORE_OLD_ERROR="core.json does not name the installed package for a rollback"
 		return 1
 	fi
+	repo="$(xraywrt-json core-repo "$CORE_JSON_FILE" 2>/dev/null)" || repo=""
+	case "$repo" in "$XRAYWRT_RELEASE_REPO" | "$XRAYWRT_CORE_RELEASE_REPO") ;; *)
+		CORE_OLD_ERROR="core.json has an invalid rollback repository"
+		return 1 ;; esac
 	size="$(uint_norm "$size")"
 	avail="$(awk '$1 == "MemAvailable:" { print $2; exit }' "$MEMINFO_FILE" 2>/dev/null)"
 	is_uint "$avail" && [ $(($(uint_norm "$avail") * 1024)) -gt $((size + 16777216)) ] || {
 		CORE_OLD_ERROR="not enough RAM for the rollback copy $asset: need $(((size + 16777216 + 1048575) / 1048576)) MiB"
 		return 1
 	}
-	core_fetch_verified "https://github.com/$XRAYWRT_RELEASE_REPO/releases/download/$tag/$asset" "$out" "$size" "$sha" "$size" || {
+	core_fetch_verified "https://github.com/$repo/releases/download/$tag/$asset" "$out" "$size" "$sha" "$size" || {
 		case "$CORE_FETCH_ERROR" in
 		sha256 | size) CORE_OLD_ERROR="the downloaded rollback package $asset does not match core.json" ;;
 		*) CORE_OLD_ERROR="cannot download the installed package $asset for a rollback ($CORE_FETCH_ERROR)" ;;
@@ -458,7 +464,7 @@ core_json_record() {
 	if ! { ensure_dir "${CORE_JSON_FILE%/*}" &&
 		atomic_write "$CORE_JSON_FILE" "$(xraywrt-json build object --arg tag "$CORE_TAG" \
 			--arg asset "$CORE_ASSET" --arg sha256 "$CORE_SHA256" --argjson size "$1" \
-			--arg version "$CORE_PKG_VERSION" --arg source package --argjson installed_at "$(date +%s)")"; }; then
+			--arg version "$CORE_PKG_VERSION" --arg repo "$XRAYWRT_CORE_RELEASE_REPO" --arg source package --argjson installed_at "$(date +%s)")"; }; then
 		warn "Core update: cannot write $CORE_JSON_FILE"
 	fi
 }
@@ -575,7 +581,7 @@ core_pkg_update() {
 		err "Core update: $CORE_ERROR"
 		return 1
 	fi
-	log "Core updated: package $CORE_PACKAGE $CORE_PKG_VERSION from $XRAYWRT_RELEASE_REPO@$CORE_TAG"
+	log "Core updated: package $CORE_PACKAGE $CORE_PKG_VERSION from $XRAYWRT_CORE_RELEASE_REPO@$CORE_TAG"
 }
 
 # CLI/job boundary of core-update: [--no-rollback], at most once.

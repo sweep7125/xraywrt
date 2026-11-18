@@ -604,6 +604,16 @@ seq(async () => {
  // One ordered list, with its format and targets under it.
  h.assertEq(opts._rules.title, 'My rules', 'one list for sites and addresses');
  h.assertEq(opts._rules.cfgvalue(), 'example.com direct\n', 'My rules loaded from lists-json');
+ const previewOpts = await renderLists({ mode: 'direct-first', provider: {}, provider_sources: {
+  vpn: { addresses: ['192.0.2.1'], links: 2, truncated: true }, direct: { addresses: ['2001:db8::/32'], links: 1, truncated: false } } });
+ const previewWidget = previewOpts._rules.renderWidget();
+ const previewButton = findButton(previewWidget, 'Subscription lists');
+ h.assert(previewButton, 'subscription lists beside personal rules');
+ const preview = toggleOf(previewWidget, previewButton).children[1];
+ h.assert(preview.hidden, 'subscription lists collapsed');
+ const previewText = texts(preview);
+ for (const value of ['VPN addresses (Only selected sites via VPN mode)', 'Direct addresses (Everything via VPN except exclusions mode)', '192.0.2.1', '2001:db8::/32', 'Preview truncated.', 'Remote links: 2', 'Remote links: 1']) h.assert(previewText.includes(value), 'provider preview includes ' + value);
+ h.assert(!previewText.includes('example.com direct'), 'personal rules excluded from provider preview');
  const rulesWidget = opts._rules.renderWidget();
  h.assert(texts(rulesWidget).includes('direct') && texts(rulesWidget).includes('core'), 'the hint names direct and core');
  h.assert(texts(rulesWidget).includes('proxy, pool') && !findButton(rulesWidget, 'Show the targets'), 'a few targets are listed at once');
@@ -2059,16 +2069,20 @@ seq(async () => {
   }
   h.assert(texts(render(healthy, { ...resources, flash_free_kb: 0 })).includes('Little free flash: 0 MB'), 'zero flash is low');
  });
+ await check('list entry summary', () => {
+  h.assert(!texts(render()).includes('List entries'), 'raw source-line totals are not presented as effective entries');
+ });
  await check('temporary storage', () => {
   const values = texts(render(healthy, { ...resources, tmp_xraywrt_kb: 2560, tmp_free_kb: 6399 }));
   const size = 'XrayWRT temporary files (runtime config, downloads)';
   const free = 'Free temporary storage';
-  h.assertEq(values[values.indexOf(size) + 1], '3 MB', 'temporary files nearest MB');
-  h.assertEq(values[values.indexOf(free) + 1], '6 MB', 'free tmpfs floors MB');
+  h.assertEq(values[values.indexOf(size) + 1], '2.5 MB', 'temporary files use byte formatter');
+  h.assert(!values.includes(free), 'free tmpfs row removed');
+  const small = texts(render(healthy, { ...resources, tmp_xraywrt_kb: 12 }));
+  h.assertEq(small[small.indexOf(size) + 1], '12.0 KB', 'small temporary files are not zero MB');
   h.assert(!texts(render(healthy, { ...resources, tmp_xraywrt_kb: null, tmp_free_kb: null })).includes(size), 'unknown sizes absent');
   const zero = texts(render(healthy, { ...resources, tmp_xraywrt_kb: 0, tmp_free_kb: 0 }));
-  h.assertEq(zero[zero.indexOf(size) + 1], '0 MB', 'empty directory is zero');
-  h.assertEq(zero[zero.indexOf(free) + 1], '0 MB', 'full tmpfs is zero');
+  h.assertEq(zero[zero.indexOf(size) + 1], '0 B', 'empty directory is zero');
  });
  await check('no proxy port warning (the generator keeps only loopback inbounds)', () => {
   h.assert(!texts(render(healthy, { ...resources, open_proxy_ports: [7890] })).some(t => t.includes('7890')), 'no open ports item');
@@ -2378,7 +2392,7 @@ seq(async () => {
  // One grid: version, source, free flash/RAM share the value column and the row gap.
  const coreGrids = () => collect(p).filter(n => /\bmw-grid\b/.test(n.attrs.class || ''));
  h.assertEq(coreGrids().length, 1, 'core facts in a single aligned grid');
- h.assert(['Core version', 'Core source', 'Free flash', 'Free memory'].every(t => texts(coreGrids()[0]).includes(t)), 'version, source, flash and RAM rows in that grid');
+ h.assert(['Core version', 'Core source'].every(t => texts(coreGrids()[0]).includes(t)) && !['Free flash', 'Free memory'].some(t => texts(coreGrids()[0]).includes(t)), 'only version and source rows in that grid');
  await findButton(p, 'Check for updates').listeners.click(); await settle();
  h.assertEq(uciCalls.length, 0, 'Updates page writes no UCI');
  h.assert(texts(p).includes('A new core is available: v26.12.1.'), 'latest tag shown');
@@ -2387,7 +2401,7 @@ seq(async () => {
  h.assert(!texts(p).includes('flash 34 MB, memory 46 MB'), 'compressed APK size is not installed size');
  h.assert(!texts(p).includes('Installed size is checked on the router before installation.'), 'redundant installed-size note removed');
  h.assert(!texts(p).includes('Little free flash: the update removes the current core first and stops XrayWRT while the core is replaced.'), 'compressed size cannot predict flash replacement');
- h.assert(texts(p).includes('20 MB') && texts(p).includes('100 MB'), 'free flash and RAM');
+ h.assert(!texts(p).includes('Free flash') && !texts(p).includes('Free memory'), 'resource rows absent');
  // Same version as the file-installed core: not "a new core".
  checkReply = { installed: { source: 'file', channel: null, tag: null }, xray_version: '26.11.1-1424', latest: { tag: 'v26.11.1-1424', size: 30 * 1048576 }, update_available: true, channel_changed: false, error: null };
  await findButton(p, 'Check for updates').listeners.click(); await settle();

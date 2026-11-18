@@ -201,10 +201,36 @@ status_json() {
 		--arg geodata "$(status_geodata)"
 }
 
+# Bounded, validated provider literals only; URL contents never leave the router.
+provider_list_preview() {
+	local kind="$1"
+	lists_provided "$kind" || { printf 'links 0\n'; return; }
+	lists_provider_entries "$kind" | awk '
+		tolower($0) ~ /^https?:\/\// { links++; next }
+		length($0) > 256 || ++candidates > 100 { truncated = 1 }
+		END { print "links " links+0; if (truncated) print "truncated 1" }
+	'
+	lists_provider_entries "$kind" | awk '
+		tolower($0) ~ /^https?:\/\// || length($0) > 256 { next }
+		++candidates <= 100 { print }
+	' | lists_classify 0 "$kind" | awk '
+		NR <= 50 { sub(/^[^ ]+ /, ""); print "address " $0 }
+		END { if (NR > 50) print "truncated 1" }
+	'
+}
+
 # Provider profile for the Lists page: mode, DNS, provider settings,
 # the user's overrides and provider list state.
 profile_json() {
+	local preview_unavailable=1 vpn_preview="" direct_preview=""
 	settings_load || return 1
+	if [ -r "$XRAY_CONFIG" ] && [ -r "$PROFILE_FILE" ] &&
+		grep -qx 'profile-schema 1' "$PROFILE_FILE" && grep -qx 'fake-enabled [01]' "$PROFILE_FILE" &&
+		! [ "$XRAY_CONFIG" -nt "$PROFILE_FILE" ]; then
+		preview_unavailable=0
+		vpn_preview="$(provider_list_preview dst)"
+		direct_preview="$(provider_list_preview direct)"
+	fi
 	xraywrt-json build profile \
 		--arg mode "$POLICY_MODE" --arg mode_source "$(profile_get mode-source)" \
 		--arg fake_enabled "$(profile_get fake-enabled)" \
@@ -214,11 +240,12 @@ profile_json() {
 		--argjson dns_outbounds "$(xraywrt-json dns-outbounds "$XRAY_CONFIG" "$PROFILE_NAME" 2>/dev/null || echo null)" \
 		--arg dns_raw_lost "${DNS_RAW_LOST:-}" --arg dns_raw_via "${DNS_RAW_VIA:-}" \
 		--arg targets "$(lists_rule_targets)" --arg reserved "$(profile_entries rules-reserved)" \
-		--arg provider_lists "$({ lists_provided dst || lists_provided direct; } && echo 1)"
+		--arg provider_lists "$({ lists_provided dst || lists_provided direct; } && echo 1)" \
+		--arg preview_unavailable "$preview_unavailable" --arg vpn_preview "$vpn_preview" --arg direct_preview "$direct_preview"
 }
 
 diagnostics_json() {
-	local dns_error="" package="" installed="" conflicts="" flash="" ram="" rss="" pid="" tmp_xraywrt="" tmp_free=""
+	local dns_error="" package="" installed="" conflicts="" flash="" ram="" rss="" pid="" tmp_xraywrt=""
 
 	dns_error="$(dns_guard 2>&1)" || :
 	installed="$(pkg_installed_names)"
@@ -233,14 +260,13 @@ $package
 		esac
 	done
 	tmp_xraywrt="$(du -sk "$PKG_TMP_DIR" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ { print $1; exit }')"
-	tmp_free="$(df -kP /tmp 2>/dev/null | awk 'END { if (NR > 1 && $4 ~ /^[0-9]+$/) print $4 }')"
 	flash="$(df -kP /opt/xraywrt 2>/dev/null | awk 'END { if (NR > 1 && $4 ~ /^[0-9]+$/) print $4 }')"
 	ram="$(awk '$1 == "MemAvailable:" && $2 ~ /^[0-9]+$/ { print $2; exit }' /proc/meminfo 2>/dev/null)"
 	if pid="$(service_pid)"; then
 		rss="$(awk '$1 == "VmRSS:" && $2 ~ /^[0-9]+$/ { print $2; exit }' "/proc/$pid/status" 2>/dev/null)"
 	fi
 	xraywrt-json build diagnostics --arg conflicts "$conflicts" --arg flash "$flash" --arg ram "$ram" \
-		--arg rss "$rss" --arg tmp_xraywrt "$tmp_xraywrt" --arg tmp_free "$tmp_free" \
+		--arg rss "$rss" --arg tmp_xraywrt "$tmp_xraywrt" \
 		--arg dns_guard_error "$(printf '%s' "$dns_error" | error_text)" \
 		--argjson config_valid "$(config_valid_json)" \
 		--arg config_output "$([ "$(config_valid_json)" != false ] || cat "$CONFIG_ERR_FILE" 2>/dev/null)"

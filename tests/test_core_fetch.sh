@@ -88,7 +88,7 @@ pass 'sha256 and size are checked'
 jq --arg s "$asset_size" '.assets[0].size = 67108865' "$tmpdir/release.json" >"$tmpdir/r" && mv "$tmpdir/r" "$tmpdir/release.json"
 if fetch_asset; then fail 'oversized asset must fail'; fi
 assert_eq 'asset xraywrt-core_0.25.1-r1_aarch64_generic.apk is too large (67108865 bytes, limit 67108864)' "$CORE_ERROR" 'size limit error'
-assert_false 'oversized asset is not downloaded' grep -q 'example.com' "$tmpdir/curl.log"
+assert_false 'oversized asset is not downloaded' grep -q 'xraywrt-core_0.25.1-r1_aarch64_generic.apk' "$tmpdir/curl.log"
 jq --arg s "$asset_size" '.assets[0].size = ($s | tonumber)' "$tmpdir/release.json" >"$tmpdir/r" && mv "$tmpdir/r" "$tmpdir/release.json"
 pass 'asset size limit'
 
@@ -97,7 +97,7 @@ need_kb=$(((asset_size + 16777216 + 1023) / 1024))
 meminfo "$((need_kb - 1))"
 if fetch_asset; then fail 'low RAM must fail'; fi
 assert_eq "not enough RAM: need 17 MiB, available $(((need_kb - 1) / 1024)) MiB [E:core_ram|17|$(((need_kb - 1) / 1024))]" "$CORE_ERROR" 'RAM error'
-assert_false 'low RAM: nothing downloaded' grep -q 'example.com' "$tmpdir/curl.log"
+assert_false 'low RAM: nothing downloaded' grep -q 'xraywrt-core_0.25.1-r1_aarch64_generic.apk' "$tmpdir/curl.log"
 meminfo "$need_kb"
 fetch_asset || fail "exact RAM budget: $CORE_ERROR"
 assert_file_contains "$tmpdir/curl.log" "--max-filesize $asset_size " 'published size: download capped to that size'
@@ -120,7 +120,7 @@ pass 'RAM budget without published size'
 # Spec 4.1: the body comes from github.com, then each GITHUB_PROXIES route;
 # every attempt is checked against the sha256; tag and hash never via a proxy.
 meminfo 200000
-gh_url=https://github.com/sweep7125/xraywrt/releases/download/v0.2.0/xraywrt-core_0.25.1-r1_aarch64_generic.apk
+gh_url=https://github.com/sweep7125/xraywrt-core/releases/download/v0.2.0/xraywrt-core_0.25.1-r1_aarch64_generic.apk
 jq --arg u "$gh_url" '.assets[0].browser_download_url = $u' "$tmpdir/release.json" >"$tmpdir/r" && mv "$tmpdir/r" "$tmpdir/release.json"
 sed 's/Xray 26/Xray 66/' "$tmpdir/asset" >"$tmpdir/bad"
 assert_eq "gh-proxy.com ghproxy.net" "$GITHUB_PROXIES" 'GitHub proxies (spec 4.1)'

@@ -41,7 +41,7 @@ check_output() {
  # Kernel resource counters can change between the two real reads.
  if [ "$set" = diagnostics ]; then
   for output in full narrow; do
-   jq 'del(.ram_available_kb,.tmp_free_kb)' "$tmpdir/$output.out" >"$tmpdir/$output.stable"
+   jq 'del(.ram_available_kb)' "$tmpdir/$output.out" >"$tmpdir/$output.stable"
    mv "$tmpdir/$output.stable" "$tmpdir/$output.out"
   done
  fi

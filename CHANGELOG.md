@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Use the separate public core release repository for core updates and rollback.
+- Improve diagnostics, support reports, and traffic and update guidance.
+
 ## 0.1.0
 
 First release.

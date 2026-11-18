@@ -85,7 +85,8 @@ all|resources)
  mkdir -p "$tmpdir/pkgtmp"
  printf cache >"$tmpdir/pkgtmp/fixture"
  expected="$(du -sk "$tmpdir/pkgtmp" | awk '{print $1}')"
- assert_eq "$expected:60000" "$(diag | jq -r '"\(.tmp_xraywrt_kb):\(.tmp_free_kb)"' 2>/dev/null)" 'temporary storage snapshot'
+ assert_eq "$expected" "$(diag | jq -r .tmp_xraywrt_kb)" 'temporary storage snapshot'
+ assert_eq false "$(diag | jq 'has("tmp_free_kb")')" 'unused free temporary storage omitted'
  rm -rf "$tmpdir/pkgtmp"
  assert_eq null "$(diag | jq .tmp_xraywrt_kb)" 'absent temporary files unknown'
  pass 'diagnostics resources'

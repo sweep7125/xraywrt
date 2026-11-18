@@ -152,6 +152,15 @@ function emit(v, pretty) { print(encode(v, pretty), '\n'); }
 function raw(v) { return type(v) == 'string' ? utf8(v) : encode(v); }
 function fallback(v, d) { return v == null || v === false ? d : v; }
 function lines(s, sep) { return filter(split(s ?? '', sep ?? '\n'), (v) => length(v) > 0); }
+function provider_preview(s) {
+	let addresses = [], links = 0, truncated = false;
+	for (let row in lines(s)) {
+		if (substr(row, 0, 8) == 'address ') push(addresses, substr(row, 8));
+		else if (substr(row, 0, 6) == 'links ') links = num(substr(row, 6)) ?? 0;
+		else if (row == 'truncated 1') truncated = true;
+	}
+	return { addresses, links, truncated };
+}
 function numeric(v) { return type(v) == 'object' && proto(v) == decimal ? +v.text : v; }
 function opt(v) { return v == null || v == '' ? null : v; }
 // Spec 15: secret values in the runtime view.
@@ -224,9 +233,9 @@ function build(shape, a) {
 	case 'profile':
 		let provider = {};
 		for (let row in lines(a.provider)) { let p = split(row, ' '); provider[p[0]] = p[1]; }
-		return {mode: a.mode, mode_source: a.mode_source, fake_enabled: a.fake_enabled == '1', direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0', dns: a.dns, provider, overrides: override_count(a), targets: lines(a.targets), dns_outbounds: a.dns_outbounds ?? [], dns_raw_lost: dns_raw_lost(a), reserved: lines(a.reserved), provider_lists: a.provider_lists == '1'};
+		return {mode: a.mode, mode_source: a.mode_source, fake_enabled: a.fake_enabled == '1', direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0', dns: a.dns, provider, overrides: override_count(a), targets: lines(a.targets), dns_outbounds: a.dns_outbounds ?? [], dns_raw_lost: dns_raw_lost(a), reserved: lines(a.reserved), provider_lists: a.provider_lists == '1', provider_sources: a.preview_unavailable == '1' ? null : {vpn: provider_preview(a.vpn_preview), direct: provider_preview(a.direct_preview)}};
 	case 'diagnostics': return {
-		conflicts: lines(a.conflicts), flash_free_kb: num(a.flash), tmp_xraywrt_kb: num(a.tmp_xraywrt), tmp_free_kb: num(a.tmp_free),
+		conflicts: lines(a.conflicts), flash_free_kb: num(a.flash), tmp_xraywrt_kb: num(a.tmp_xraywrt),
 		ram_available_kb: num(a.ram), xray_rss_kb: num(a.rss),
 		dns_guard_error: a.dns_guard_error || null,
 		config_test: {valid: a.config_valid, output: lines(a.config_output)}
@@ -278,6 +287,15 @@ try {
 		}
 		let value = build(shape, a);
 		emit(cmd == 'merge' ? merge(parse(read(path)), value) : value, shape == 'config' || shape == 'runtime');
+		break;
+	}
+	case 'core-repo': {
+		let obj = parse(read(shift(ARGV)));
+		if (type(obj) != 'object') die('Expected core metadata object');
+		if (!('repo' in obj)) print('sweep7125/xraywrt\n');
+		else if (type(obj.repo) == 'string' && obj.repo == 'sweep7125/xraywrt') print('sweep7125/xraywrt\n');
+		else if (type(obj.repo) == 'string' && obj.repo == 'sweep7125/xraywrt-core') print('sweep7125/xraywrt-core\n');
+		else die('Invalid core repository');
 		break;
 	}
 	case 'get': {
@@ -488,9 +506,9 @@ try {
 		break;
 	}
 	case 'assets': {
-		// assets <release.json>: name, url, digest, size of every asset, tab-separated.
+		// assets <release.json>: name, digest, size of every asset, tab-separated.
 		let obj = parse(read(shift(ARGV)));
-		for (let a in fallback(obj.assets, [])) print(raw(a.name), '\t', raw(a.browser_download_url), '\t', raw(fallback(a.digest, '')), '\t', raw(fallback(a.size, '')), '\n');
+		for (let a in fallback(obj.assets, [])) print(raw(a.name), '\t', raw(fallback(a.digest, '')), '\t', raw(fallback(a.size, '')), '\n');
 		break;
 	}
 	default: { die('Unknown JSON operation: ' + cmd);

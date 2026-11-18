@@ -660,32 +660,53 @@ test('balancer wrappers preserve empty target and ACL separation', async () => {
  assert(!acl.read.file['/usr/bin/xraywrt'], 'read cannot execute mutating backend');
  assert(acl.write.file['/usr/bin/xraywrt'].includes('exec'));
 });
-test('support report includes only support fields, masks secrets and limits logs', () => {
+test('support report is readable, allowlisted and contains failures only', () => {
  const { api } = setup();
- const secret = '12345678-1234-abcd-ABCD-123456789012';
- const url = 'https://provider.example/sub/private-token?key=secret';
- const report = api.reportText({
-  status: { version: '1.2.3', core: 'xcore-0.22', mode: 'direct-first', state: 'degraded', degraded_reason: 'dns',
-   warnings: [secret, 'password=hunter2', url], errors: ['failed'], config: 'CONFIG-SECRET', subscription_url: url },
-  diagnostics: { flash_free_kb: 1234, ram_available_kb: 5678, config_test: { output: ['CONFIG-SECRET'] } },
-  checks: [[false, 'DNS failed', 'try again']],
-  logs: { available: true, lines: ['old-line', ...Array.from({ length: 100 }, (_, i) => 'line-' + i + ' ' + secret + ' password=hunter2 ' + url)] },
-  config: 'CONFIG-SECRET', subscription: { url }
- });
- for (const value of ['1.2.3', 'xcore-0.22', 'direct-first', 'degraded', 'dns', '1234', '5678', 'DNS failed', 'try again', 'line-99', '***']) assert(report.includes(value), value);
- for (const value of [secret, 'hunter2', url, 'private-token', 'CONFIG-SECRET', 'old-line']) assert(!report.includes(value), 'report leaked ' + value);
- assert.equal((report.match(/line-\d+/g) || []).length, 100);
- assert(api.reportText({ logs: { available: false } }).includes('System log is not available.'));
+ const secret = 'https://example.com/token uuid=12345678-1234-abcd-ABCD-123456789012 password=secret';
+ const report = api.reportText({ status: { version: '1.2.3', core: '26.1', mode: 'direct-first', state: 'failed', core_installed: true, config_valid: false, config_error: secret, last_error: secret, warnings: [secret], errors: [secret] }, diagnostics: { flash_free_kb: 1234, ram_available_kb: 5678, config_test: { output: [secret] } }, checks: [[false, secret, secret]], logs: { available: true, lines: [secret] } });
+ for (const value of ['1.2.3', '26.1', 'Only selected sites via VPN', 'Configuration has errors', 'Update the subscription']) assert(report.includes(value), value);
+ for (const value of [secret, 'example.com', 'token', 'secret', '12345678', 'Log:', '{', 'Xray-core']) assert(!report.includes(value), value);
+ assert(!report.includes('Press Start on Home.'), 'no misleading start advice when config invalid');
 });
-test('report redacts quoted passwords before JSON escaping, including warning and checklist text', () => {
+test('support report safely identifies invalid settings and a busy DNS port', () => {
  const { api } = setup();
- const report = api.reportText({ status: { warnings: ['password="quoted secret"', "PASSWORD='single secret'", 'password=comma,semicolon;secret'] }, checks: [[false, 'password="check secret"']], logs: { available: true, lines: ['password="log secret"'] } });
- for (const value of ['quoted secret', 'single secret', 'comma,semicolon;secret', 'check secret', 'log secret']) assert(!report.includes(value), 'leaked ' + value);
+ const st = { core_installed: true, state: 'failed', errors: ['broken secret [E:settings_invalid]'], last_error: 'owner secret [E:dns_port_busy|owner-secret]' };
+ const report = api.reportText({ status: st, diagnostics: { dns_guard_error: 'owner secret [E:dns_port_busy|owner-secret]' } });
+ assert(report.includes('XrayWRT settings are damaged.'));
+ assert(report.includes('Port 53 is occupied.'));
+ assert(!report.includes('Press Start on Home.') && !report.includes('No known problems found.'));
+ assert(!report.includes('secret') && !report.includes('owner'));
+ assert.equal((report.match(/Port 53 is occupied\./g) || []).length, 1);
+ const running = api.reportText({ status: { core_installed: true, state: 'running', policy_active: true }, diagnostics: { dns_guard_error: 'private [E:dns_port_busy|private]' } });
+ assert(running.includes('Disable the other DNS service.') && !running.includes('then start XrayWRT.'));
+ const dnsOnly = api.reportText({ status: { core_installed: true, state: 'failed' }, diagnostics: { dns_guard_error: 'private [E:dns_port_busy|private]' } });
+ assert(dnsOnly.includes('Port 53 is occupied.') && !dnsOnly.includes('Press Start on Home.'));
 });
-test('report masks passwords containing escaped quotes', () => {
+test('support report treats current DNS diagnostics as authoritative', () => {
  const { api } = setup();
- const report = api.reportText({ logs: { available: true, lines: ['password="escaped \\"private\\" tail"'] } });
- assert(!report.includes('private') && !report.includes('tail'), report);
+ const status = { core_installed: true, state: 'failed', last_error: 'private [E:dns_port_busy|private]' };
+ const cleared = api.reportText({ status, diagnostics: { dns_guard_error: null } });
+ assert(!cleared.includes('Port 53 is occupied.') && cleared.includes('Press Start on Home.'));
+ const missing = api.reportText({ status });
+ assert(!missing.includes('Port 53 is occupied.') && !missing.includes('private'));
+});
+test('support report distinguishes degraded state and unknown checks', () => {
+ const { api } = setup();
+ const degraded = api.reportText({ status: { core_installed: true, state: 'degraded', degraded_reason: 'observatory', policy_active: true } });
+ assert(degraded.includes('Degraded') && degraded.includes('VPN server is not responding'));
+ const unknown = api.reportText({ status: { core_installed: true, state: 'starting' } });
+ assert(unknown.includes('No known problems found.') && !unknown.includes('No problems found.'));
+});
+test('support report accepts numeric core version and rejects injected version suffixes', () => {
+ const { api } = setup();
+ assert(api.reportText({ status: { core: 'v26.11.1-1424' } }).includes('v26.11.1-1424'));
+ assert(!api.reportText({ status: { core: '26.11.1-secret' } }).includes('secret'));
+});
+test('support report omits dynamic values and ignores healthy checks', () => {
+ const { api } = setup();
+ const report = api.reportText({ status: { version: '1.0', core: 'brand secret', mode: 'proxy-first', state: 'running', core_installed: true, config_valid: true, policy_active: true, dns_ok: true, custom_dns_servers: ['secret'] }, checks: [[true, 'OK SECRET', 'SECRET']] });
+ assert(!report.includes('brand secret') && !report.includes('OK SECRET') && !report.includes('SECRET'));
+ assert(report.includes('dnsmasq has its own upstream servers'));
 });
 function nodes(n) { return !n || typeof n !== 'object' ? [] : [n, ...(n.children || []).flatMap(nodes)]; }
 test('connection check asks the router, shows the direct-first hint and handles errors', async () => {
@@ -718,11 +739,11 @@ test('Help copies report over plain HTTP without the Clipboard API', async () =>
   api, view: { extend: v => v }, configuration: { render: () => E('div') }, navigator: {},
   document: { body: { appendChild: node => { area = node; } }, execCommand: command => { assert.equal(command, 'copy'); return true; } }
  }).module;
- const page = help.render([{ version: 'http-copy' }, {}, {}]);
+ const page = help.render([{ version: '1.2.3' }, {}, {}]);
  await nodes(page).find(n => n.tag === 'button' && n.children.includes('Copy report')).click();
- assert(area && area.children.join('').includes('http-copy')); assert(removed, 'temporary selection removed');
+ assert(area && area.children.join('').includes('1.2.3')); assert(removed, 'temporary selection removed');
 });
-test('Help copies report with last 100 log lines, never runtime configuration', async () => {
+test('Help copies report without reading logs', async () => {
  let copied, reads = [];
  const { api } = setup();
  api.readLarge = async (...args) => { reads.push(args); return { available: true, lines: ['password=secret'] }; };
@@ -733,7 +754,7 @@ test('Help copies report with last 100 log lines, never runtime configuration', 
  const page = help.render([{ version: '1.0', mode: 'proxy-first' }, {}, {}]);
  const copy = nodes(page).find(n => n.tag === 'button' && n.children.includes('Copy report'));
  assert(copy, 'copy report action'); await copy.click();
- assert.deepEqual(reads, [['logs-json', '100']]); assert(copied.includes('1.0')); assert(!copied.includes('password=secret'));
+ assert.deepEqual(reads, []); assert(copied.includes('1.0')); assert(!copied.includes('password=secret'));
 });
 test('connect saved result after restart retains starting notice, partial retains warning', () => {
  const { api } = setup();

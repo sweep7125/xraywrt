@@ -44,7 +44,7 @@ for input in '' '1 2' '{"n":1.0}' 'null' 'broken'; do
 done
 pass 'JSON helper: job result slurp'
 release='{"tag_name":"v1","assets":[{"name":"a","browser_download_url":"https://x/$(touch /tmp/injected)","size":1.0},{"name":"other"}]}'
-parity 'release assets text is never evaluated' "$(jq -r '.assets[]?|"\(.name)\t\(.browser_download_url)\t\(.digest // "")\t\(.size // "")"' <<<"$release")" assets <<<"$release"
+parity 'release assets text is never evaluated' "$(jq -r '.assets[]?|"\(.name)\t\(.digest // "")\t\(.size // "")"' <<<"$release")" assets <<<"$release"
 # Exercise the documented 8 MiB cap without argv-size limits.
 awk 'BEGIN { for(i=0;i<131072;i++) print "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/" }' >"$tmpdir/large"
 "$helper" build object --rawfile content "$tmpdir/large" >"$tmpdir/actual"
@@ -110,8 +110,8 @@ done
 "$helper" build profile --arg dns_raw_lost 'saved |] <tag>' --argjson dns_outbounds '["saved |] <tag>"]' >"$tmpdir/safety-profile.json"
 assert_eq 'saved |] <tag>' "$(jq -r .dns_raw_lost "$tmpdir/safety-profile.json")" 'persisted lost tag remains latched after restoration'
 pass 'JSON helper: safety state distinguishes absent, present and failed catalogs'
-parity 'empty profile has no targets' '{"mode":"proxy-first","mode_source":null,"fake_enabled":false,"direct_domains":null,"sniff":"0","dns":"redir-host","provider":{},"overrides":0,"targets":[],"dns_outbounds":[],"dns_raw_lost":"","reserved":[],"provider_lists":false}' build profile --arg mode proxy-first --arg dns redir-host --arg provider '' --arg overrides '' --arg targets '' --arg reserved ''
-parity 'diagnostics omit unused ports' '{"conflicts":[],"flash_free_kb":null,"tmp_xraywrt_kb":null,"tmp_free_kb":null,"ram_available_kb":null,"xray_rss_kb":null,"dns_guard_error":null,"config_test":{"valid":null,"output":[]}}' build diagnostics --arg ports ''
+parity 'empty profile has no targets' '{"mode":"proxy-first","mode_source":null,"fake_enabled":false,"direct_domains":null,"sniff":"0","dns":"redir-host","provider":{},"overrides":0,"targets":[],"dns_outbounds":[],"dns_raw_lost":"","reserved":[],"provider_lists":false,"provider_sources":{"vpn":{"addresses":[],"links":0,"truncated":false},"direct":{"addresses":[],"links":0,"truncated":false}}}' build profile --arg mode proxy-first --arg dns redir-host --arg provider '' --arg overrides '' --arg targets '' --arg reserved ''
+parity 'diagnostics omit unused ports' '{"conflicts":[],"flash_free_kb":null,"tmp_xraywrt_kb":null,"ram_available_kb":null,"xray_rss_kb":null,"dns_guard_error":null,"config_test":{"valid":null,"output":[]}}' build diagnostics --arg ports ''
 printf '%s\n' '{"id":"10-3","started":10,"state":"ok"}' >"$tmpdir/history-valid.json"
 printf '%s\n' '{"id":"10-x","started":10,"state":"ok"}' >"$tmpdir/history-invalid.json"
 parity 'non-numeric history id segment sorts as null' $'[\n  {\n    "id": "10-x",\n    "started": 10,\n    "state": "ok"\n  },\n  {\n    "id": "10-3",\n    "started": 10,\n    "state": "ok"\n  }\n]' history sort "$tmpdir/history-valid.json" "$tmpdir/history-invalid.json"
@@ -147,4 +147,4 @@ for i in "${!lax_inputs[@]}"; do
  pass "JSON helper: native leniency emits strict JSON [${lax_inputs[$i]}]"
 done
 
-parity 'profile targets of My rules and reserved tags' '{"mode":"direct-first","mode_source":null,"fake_enabled":false,"direct_domains":null,"sniff":"0","dns":"","provider":{},"overrides":0,"targets":["proxy","pool"],"dns_outbounds":["VPN tag"],"dns_raw_lost":"","reserved":["direct"],"provider_lists":false}' build profile --arg mode direct-first --arg dns '' --arg provider '' --arg overrides '' --arg targets $'proxy\npool' --argjson dns_outbounds '["VPN tag"]' --arg reserved direct
+parity 'profile targets of My rules and reserved tags' '{"mode":"direct-first","mode_source":null,"fake_enabled":false,"direct_domains":null,"sniff":"0","dns":"","provider":{},"overrides":0,"targets":["proxy","pool"],"dns_outbounds":["VPN tag"],"dns_raw_lost":"","reserved":["direct"],"provider_lists":false,"provider_sources":{"vpn":{"addresses":[],"links":0,"truncated":false},"direct":{"addresses":[],"links":0,"truncated":false}}}' build profile --arg mode direct-first --arg dns '' --arg provider '' --arg overrides '' --arg targets $'proxy\npool' --argjson dns_outbounds '["VPN tag"]' --arg reserved direct

@@ -32,9 +32,10 @@ CONFIG_ERR_FILE="$PKG_STATE_DIR/config.err"
 NFT_APPLIED_FILE="$PKG_TMP_DIR/nft.applied"
 NET_FP_FILE="$PKG_STATE_DIR/net.fp"
 
-# Spec 4.5: "core" = the xraywrt-core package from the XrayWRT releases.
+# Spec 4.5: "core" = the xraywrt-core package from the separate core releases.
 CORE_PACKAGE="xraywrt-core"
 XRAYWRT_RELEASE_REPO="sweep7125/xraywrt"
+XRAYWRT_CORE_RELEASE_REPO="sweep7125/xraywrt-core"
 # Spec 4.1: file bodies only (hash and tag never), as https://<proxy>/<github URL>.
 GITHUB_PROXIES="gh-proxy.com ghproxy.net"
 # Core and geodata download routes resolve via WAN DNS (spec 7.1).

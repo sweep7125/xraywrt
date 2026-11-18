@@ -27,7 +27,8 @@ wget -qO- https://raw.githubusercontent.com/sweep7125/xraywrt/main/install.sh | 
 
 Choose install and language. The installer checks package checksums, installs
 LuCI packages and dependencies, and runs `xraywrt core-update` to install the
-separate core package. If no core package matches the architecture, the app
+separate core package from `sweep7125/xraywrt-core`; app releases are in
+`sweep7125/xraywrt`. Latest selects stable releases, not prereleases. If no core package matches the architecture, the app
 remains installed with the service disabled. For Russian LuCI, also install
 `luci-i18n-base-ru`.
 
@@ -49,14 +50,17 @@ Check available flash and RAM before updating. A stopped service stays stopped.
 
 If `raw.githubusercontent.com` is blocked, the release-pinned installer mirror
 may help. This is a **third-party** trust point: its script runs as root. It
-mirrors neither packages nor the core.
+mirrors neither packages nor the core. The pin remains at the published v0.1.0
+installer until v0.1.1 is released. The installed app determines the core
+release location; the v0.1.0 app uses the legacy location.
 
 ```sh
 wget -qO- https://cdn.jsdelivr.net/gh/sweep7125/xraywrt@v0.1.0/install.sh | sh
 ```
 
 Alternatively, transfer release APKs from a trusted computer. Check app packages
-against `SHA256SUMS` and the matching core APK against `SHA256SUMS-core` before
+from `sweep7125/xraywrt` against `SHA256SUMS` and the matching core APK from
+`sweep7125/xraywrt-core` against `SHA256SUMS-core` before
 copying. Checksums verify integrity, not release authenticity; packages are not
 signed. Install dependencies on the router:
 

@@ -344,7 +344,7 @@ workflow_dir="$(mktemp -d)"
 trap 'rm -rf "$workflow_dir"' EXIT
 cp "$ROOT_DIR/Makefile" "$workflow_dir/Makefile"
 assert_contains 'version-check block extracted from release.yml' 'PKG_VERSION' "$version_script"
-for tag_case in v0.1.0:0:0 v0.1.0-rc1:0:1 v0.1.0-rc:1:- v0.1.1:1:- v0.1.0-beta1:1:-; do
+for tag_case in v0.1.1:0:0 v0.1.1-rc1:0:1 v0.1.1-rc:1:- v0.1.2:1:- v0.1.1-beta1:1:-; do
  IFS=: read -r tag expected_rc expected_prerelease <<<"$tag_case"
  : >"$workflow_dir/env"; : >"$workflow_dir/output"
  tag_rc=0
@@ -359,6 +359,8 @@ done
 # Check cross-job transport without prescribing the step/output identifier.
 build_job="$(awk '/^  build:/{f=1;next} f&&/^  [^ ]/{exit} f{print}' "$RELEASE_YML")"
 publish_job="$(awk '/^  publish:/{f=1;next} f{print}' "$RELEASE_YML")"
+publish_if="$(printf '%s\n' "$publish_job" | sed -n 's/^    if: //p')"
+assert_eq 'publish only on tag push, never tag dispatch' "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')" "$publish_if"
 assert_contains 'build exposes job outputs' '    outputs:' "$build_job"
 assert_contains 'build writes a step output' 'GITHUB_OUTPUT' "$build_job"
 assert_contains 'publish receives prerelease through a build output' 'needs.build.outputs.' "$publish_job"
@@ -387,6 +389,7 @@ for prerelease_flag in 0 1; do
  publish_rc=0
  (cd "$workflow_dir" && PATH="$workflow_dir/bin:$PATH" GH_CALLS="$workflow_dir/gh.calls" PRERELEASE="$prerelease_flag" GITHUB_REF_NAME=v0.1.0 GITHUB_REPOSITORY=fixture/xraywrt bash -c "$publish_script") >"$workflow_dir/publish.stdout" 2>"$workflow_dir/publish.stderr" || publish_rc=$?
  assert_eq "publish PRERELEASE=$prerelease_flag status" 0 "$publish_rc"
+ assert_eq "published release is not a draft" 0 "$(grep -cx -- '--draft' "$workflow_dir/gh.calls" || true)"
  prerelease_count="$(grep -cx -- '--prerelease' "$workflow_dir/gh.calls" || true)"
  assert_eq "publish --prerelease only when PRERELEASE=$prerelease_flag" "$prerelease_flag" "$prerelease_count"
 done

@@ -394,3 +394,43 @@ for endpoint in status_json service_state_json; do
 done
 rm "$APPLY_WARNING_FILE"
 pass 'full and cheap status expose application warning independently of process state'
+
+(
+ printf 'profile-schema 1\nfake-enabled 0\nmode direct-first\nhas proxy-ips\nhas direct-ips\nproxy-ip 192.0.2.1\nproxy-ip https://secret.example/token\nproxy-ip invalidSECRET\ndirect-ip 2001:db8::/32\ndirect-ip https://other.example/password\n' >"$PROFILE_FILE"
+ printf "direct-ip 192.0.2.2;%s\n" "$(printf '443,%.0s' $(seq 1 120))443" >>"$PROFILE_FILE"
+ for n in $(seq 1 55); do printf 'proxy-ip 198.51.100.%s\n' "$n" >>"$PROFILE_FILE"; done
+ profile_ensure() { :; }
+ json="$(profile_json)"
+ assert_eq '192.0.2.1' "$(jq -r '.provider_sources.vpn.addresses[0]' <<<"$json")" 'provider VPN literal'
+ assert_eq '2001:db8::/32' "$(jq -r '.provider_sources.direct.addresses[0]' <<<"$json")" 'provider direct literal'
+ assert_eq '50:true:1:1' "$(jq -r '"\(.provider_sources.vpn.addresses | length):\(.provider_sources.vpn.truncated):\(.provider_sources.vpn.links):\(.provider_sources.direct.links)"' <<<"$json")" 'preview bounded and links counted separately'
+ assert_eq '1:true' "$(jq -r '"\(.provider_sources.direct.addresses | length):\(.provider_sources.direct.truncated)"' <<<"$json")" 'oversized literal omitted with truncation indicator'
+ assert_false 'provider preview does not expose links or invalid values' grep -Eq 'secret|password|invalidSECRET' <<<"$json"
+)
+pass 'profile provider list preview is bounded and private'
+
+(
+ printf 'profile-schema 1\nfake-enabled 0\nhas proxy-ips\n' >"$PROFILE_FILE"
+ printf 'proxy-ip 192.0.2.1;%s\nproxy-ip https://secret.example/token\n' "$(printf '443,%.0s' $(seq 1 120))443" >>"$PROFILE_FILE"
+ for n in $(seq 1 150); do printf 'proxy-ip 198.51.100.%s\n' "$((n % 254 + 1))" >>"$PROFILE_FILE"; done
+ lists_classify() { cat >"$tmpdir/preview-classify-input"; }
+ output="$(provider_list_preview dst)"
+ assert_true 'preview caps classification input count' test "$(wc -l <"$tmpdir/preview-classify-input")" -le 100
+ assert_true 'preview filters long literals before classification' test "$(awk 'length > n { n=length } END { print n+0 }' "$tmpdir/preview-classify-input")" -le 256
+ assert_true 'preview counts links and signals truncation' bash -c '[[ "$1" == *"links 1"* && "$1" == *"truncated 1"* ]]' _ "$output"
+)
+pass 'provider preview bounds normalization work'
+
+(
+ printf 'profile-schema 1\nfake-enabled 0\nhas proxy-ips\nproxy-ip 192.0.2.1\n' >"$PROFILE_FILE"
+ printf '{}' >"$XRAY_CONFIG"
+ touch -d '2000-01-01' "$PROFILE_FILE"
+ xray_config_generate() { return 1; }
+ json="$(profile_json)"
+ assert_eq null "$(jq -c .provider_sources <<<"$json")" 'failed stale profile rebuild makes preview unavailable'
+ assert_false 'stale address not exposed by preview' grep -q '192.0.2.1' <<<"$json"
+ rm "$XRAY_CONFIG"
+ json="$(profile_json)"
+ assert_eq null "$(jq -c .provider_sources <<<"$json")" 'missing source config makes preview unavailable'
+)
+pass 'profile preview rejects stale or missing source after failed rebuild'

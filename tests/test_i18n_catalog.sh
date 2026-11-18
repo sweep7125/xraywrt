@@ -38,6 +38,7 @@ for (const [id, translated] of [
  ['Starts at boot', 'Запускается при включении роутера'],
  ['System log is not available.', 'Журнал недоступен.'],
  ['Traffic mode', 'Режим'],
+ ['VPN addresses (Only selected sites via VPN mode)', 'Адреса через VPN (режим «Через VPN только выбранное»)'],
  ['Update now', 'Обновить подписку']
 ]) assert(po.includes('msgid ' + JSON.stringify(id) + '\nmsgstr ' + JSON.stringify(translated)), 'glossary: ' + id);
 

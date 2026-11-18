@@ -1,8 +1,8 @@
 #!/bin/sh
 # XrayWRT installer: installs or updates the LuCI package (and the optional
 # Russian translation) with apk (OpenWrt 25.12+), then lets
-# /usr/bin/xraywrt install the core: the xraywrt-core package of the same
-# release (spec 4.5). SHA256SUMS comes only from github.com (or
+# /usr/bin/xraywrt install the core from its separate release repository
+# (spec 4.5). SHA256SUMS comes only from github.com (or
 # XRAYWRT_RELEASE_URL); packages from github.com, then the GitHub proxies.
 # Non-interactive: XRAYWRT_ACTION=install|remove XRAYWRT_LANGUAGE=en|ru
 set -eu

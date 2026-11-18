@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # core_channel=pkgcore (spec 4.5): the xraywrt-core package from the latest
-# XrayWRT release, sha256 from the API digest (or SHA256SUMS-core without
+# separate core release, sha256 from the API digest (or SHA256SUMS-core without
 # the API), apk add --allow-untrusted;
 # normal and tight-flash path with the old .apk as rollback; refusals of
 # core-check.
@@ -59,7 +59,8 @@ pkg_installed_names() { [ ! -f "$tmpdir/apk.installed" ] || echo xraywrt-core; }
 # The apk database (pkg.sh): the stub's one package and its version.
 pkg_version() { [ "$1" != xraywrt-core ] || [ ! -f "$tmpdir/apk.installed" ] || cat "$tmpdir/apk.installed"; }
 
-repo_url=https://github.com/sweep7125/xraywrt/releases/download
+repo_url=https://github.com/sweep7125/xraywrt-core/releases/download
+legacy_url=https://github.com/sweep7125/xraywrt/releases/download
 new_version=0.25.1-r1 old_version=0.23.0-r1 release_tag=v0.2.0
 new_asset="xraywrt-core_${new_version}_aarch64_cortex-a53.apk"
 old_asset="xraywrt-core_${old_version}_aarch64_cortex-a53.apk"
@@ -95,7 +96,7 @@ http_fetch() {
 		[ -z "${SUMS_ERROR:-}" ] || { FETCH_ERROR="$SUMS_ERROR"; return 1; }
 		printf '%s\n' "$pkgcore_sums" >"$2"
 		;;
-	https://api.github.com/repos/sweep7125/xraywrt/releases/latest)
+	https://api.github.com/repos/sweep7125/xraywrt-core/releases/latest)
 		[ -z "${API_ERROR:-}" ] || { FETCH_ERROR="$API_ERROR"; return 1; }
 		jq -nc --arg t "$release_tag" --arg d "$release_digest" --argjson s "$new_size" --arg n "$new_asset" --arg u "${NEW_URL:-$repo_url/$release_tag/$new_asset}" '{tag_name: $t, assets: [
 			{name: "luci-app-xraywrt.apk", browser_download_url: "https://example.com/luci-app-xraywrt.apk", digest: "sha256:00", size: 1},
@@ -104,7 +105,7 @@ http_fetch() {
 			{name: "xraywrt-core_0.25.1-r1_x86_64.apk", browser_download_url: "https://example.com/x86_64.apk", digest: $d, size: $s}]}' >"$2"
 		;;
 	"$repo_url/$release_tag/$new_asset") [ "${NEW_DOWN:-0}" = 0 ] || { FETCH_ERROR=network; return 1; }; cat "$tmpdir/new.apk" >"$2" ;;
-	"$repo_url/v0.1.0/$old_asset") [ "$old_available" = 1 ] || { FETCH_ERROR=http_404; return 1; }; cat "$tmpdir/old.apk" >"$2" ;;
+	"$legacy_url/v0.1.0/$old_asset"|"$repo_url/v0.1.0/$old_asset") [ "$old_available" = 1 ] || { FETCH_ERROR=http_404; return 1; }; cat "$tmpdir/old.apk" >"$2" ;;
 	*) FETCH_ERROR=http_404; return 1 ;;
 	esac
 }
@@ -147,6 +148,23 @@ assert_old_pkg_kept() {
 	assert_true "$1: core.json unchanged" cmp -s "$tmpdir/old.json" "$CORE_JSON_FILE"
 	assert_false "$1: RAM stage removed" test -e "$CORE_TMP_DIR"
 }
+
+# Rollback origins are fixed: old records default to the legacy repository.
+install_old_pkg
+mkdir -p "$CORE_TMP_DIR"
+core_pkg_old_fetch || fail "legacy rollback: $CORE_OLD_ERROR"
+assert_file_contains "$tmpdir/fetch.log" "$legacy_url/v0.1.0/$old_asset" 'legacy rollback origin'
+jq '.repo = "sweep7125/xraywrt-core"' "$CORE_JSON_FILE" >"$tmpdir/r" && mv "$tmpdir/r" "$CORE_JSON_FILE"
+reset_logs
+core_pkg_old_fetch || fail "current rollback: $CORE_OLD_ERROR"
+assert_file_contains "$tmpdir/fetch.log" "$repo_url/v0.1.0/$old_asset" 'current rollback origin'
+for invalid in '"evil/repo"' '""' 'null'; do
+ jq --argjson repo "$invalid" '.repo = $repo' "$CORE_JSON_FILE" >"$tmpdir/r" && mv "$tmpdir/r" "$CORE_JSON_FILE"
+ reset_logs
+ if core_pkg_old_fetch; then fail "invalid rollback origin accepted: $invalid"; fi
+ assert_false 'invalid origin never fetched' test -e "$tmpdir/fetch.log"
+done
+pass 'rollback origin allowlist and legacy default'
 
 # Candidate rejection must precede package mutation, even with a stopped service.
 export VERSION_LINE='Xray 26.11.1 xcore-0.25.1 (rust linux/aarch64)'
@@ -192,13 +210,13 @@ arch_is mipsel_24kc; if core_pkg_resolve; then fail 'missing arch asset accepted
 assert_eq "The core is not available for this router (mipsel_24kc); the current core is kept. [E:core_arch|mipsel_24kc]" "$CORE_ERROR" 'no package for the arch'
 arch_is aarch64_cortex-a53
 if release_digest='' core_pkg_resolve; then fail 'package without digest accepted'; fi
-assert_eq "release sweep7125/xraywrt@v0.2.0 publishes no sha256 for $new_asset [E:core_no_checksum|release sweep7125/xraywrt@v0.2.0 publishes no sha256 for $new_asset]" "$CORE_ERROR" 'digest required'
-if NEW_URL="http://example.com/$new_asset" core_pkg_resolve; then fail 'http asset URL accepted'; fi
-assert_eq "release sweep7125/xraywrt@v0.2.0 publishes a non-https URL for $new_asset" "$CORE_ERROR" 'https required'
+assert_eq "release sweep7125/xraywrt-core@v0.2.0 publishes no sha256 for $new_asset [E:core_no_checksum|release sweep7125/xraywrt-core@v0.2.0 publishes no sha256 for $new_asset]" "$CORE_ERROR" 'digest required'
+NEW_URL="http://example.com/$new_asset" core_pkg_resolve || fail "untrusted API URL should be ignored: $CORE_ERROR"
+assert_eq "$repo_url/$release_tag/$new_asset" "$CORE_URL" 'canonical HTTPS asset URL'
 if API_ERROR=http_401 core_pkg_resolve; then fail 'API failure accepted'; fi
-assert_eq 'cannot read the latest release of sweep7125/xraywrt (GitHub API: http_401) [E:core_download|cannot read the latest release of sweep7125/xraywrt (GitHub API: http_401)]' "$CORE_ERROR" 'other API errors: no fallback'
+assert_eq 'cannot read the latest release of sweep7125/xraywrt-core (GitHub API: http_401) [E:core_download|cannot read the latest release of sweep7125/xraywrt-core (GitHub API: http_401)]' "$CORE_ERROR" 'other API errors: no fallback'
 if API_ERROR=http_404 core_pkg_resolve; then fail 'no release accepted'; fi
-assert_eq 'release sweep7125/xraywrt has no releases (GitHub API: http_404)' "$CORE_ERROR" 'no releases'
+assert_eq 'release sweep7125/xraywrt-core has no releases (GitHub API: http_404)' "$CORE_ERROR" 'no releases'
 pass 'pkgcore release lookup'
 
 # API unavailable (spec 4.5): tag from the github.com redirect, sha256 from
@@ -209,8 +227,8 @@ for err in network http_403 http_429 http_502; do
 	assert_eq "$release_tag:$new_asset:$new_version:$new_sha:" "$CORE_TAG:$CORE_ASSET:$CORE_PKG_VERSION:$CORE_SHA256:$CORE_SIZE" "fallback on $err"
 	assert_eq "$repo_url/$release_tag/$new_asset" "$CORE_URL" "fallback asset URL ($err)"
 done
-assert_eq "https://api.github.com/repos/sweep7125/xraywrt/releases/latest
-redirect sweep7125/xraywrt
+assert_eq "https://api.github.com/repos/sweep7125/xraywrt-core/releases/latest
+redirect sweep7125/xraywrt-core
 $repo_url/$release_tag/SHA256SUMS-core" "$(cat "$tmpdir/fetch.log")" 'API, redirect, SHA256SUMS-core from github.com only'
 export API_ERROR=http_403
 arch_is x86_64; core_pkg_resolve || fail "fallback x86_64: $CORE_ERROR"
@@ -223,17 +241,17 @@ arch_is 64; if core_pkg_resolve; then fail 'fallback: arch suffix of another arc
 arch_is aarch64_cortex-a53
 if pkgcore_sums="$pkgcore_sums
 $old_sha  $old_asset" core_pkg_resolve; then fail 'fallback: two lines accepted'; fi
-assert_eq "release sweep7125/xraywrt@v0.2.0 lists more than one xraywrt-core_<version>_aarch64_cortex-a53.apk in SHA256SUMS-core" "$CORE_ERROR" 'fallback: one line only'
+assert_eq "release sweep7125/xraywrt-core@v0.2.0 lists more than one xraywrt-core_<version>_aarch64_cortex-a53.apk in SHA256SUMS-core" "$CORE_ERROR" 'fallback: one line only'
 if pkgcore_sums="$new_sha  xraywrt-core_1/../x_aarch64_cortex-a53.apk" core_pkg_resolve; then fail 'fallback: bad version accepted'; fi
-assert_eq 'release sweep7125/xraywrt@v0.2.0 has an invalid package version in xraywrt-core_1/../x_aarch64_cortex-a53.apk' "$CORE_ERROR" 'fallback: version checked'
+assert_eq 'release sweep7125/xraywrt-core@v0.2.0 has an invalid package version in xraywrt-core_1/../x_aarch64_cortex-a53.apk' "$CORE_ERROR" 'fallback: version checked'
 if pkgcore_sums="nothex  $new_asset" core_pkg_resolve; then fail 'fallback: bad hash accepted'; fi
-assert_eq "release sweep7125/xraywrt@v0.2.0 publishes no sha256 for $new_asset [E:core_no_checksum|release sweep7125/xraywrt@v0.2.0 publishes no sha256 for $new_asset]" "$CORE_ERROR" 'fallback: sha256 checked'
+assert_eq "release sweep7125/xraywrt-core@v0.2.0 publishes no sha256 for $new_asset [E:core_no_checksum|release sweep7125/xraywrt-core@v0.2.0 publishes no sha256 for $new_asset]" "$CORE_ERROR" 'fallback: sha256 checked'
 if SUMS_ERROR=http_404 core_pkg_resolve; then fail 'fallback without SHA256SUMS-core accepted'; fi
-assert_eq 'release sweep7125/xraywrt@v0.2.0 has no SHA256SUMS-core (http_404); GitHub API unavailable (http_403): retry later' "$CORE_ERROR" 'fallback: no SHA256SUMS-core'
+assert_eq 'release sweep7125/xraywrt-core@v0.2.0 has no SHA256SUMS-core (http_404); GitHub API unavailable (http_403): retry later' "$CORE_ERROR" 'fallback: no SHA256SUMS-core'
 if REDIRECT_TAG='' core_pkg_resolve; then fail 'fallback without the redirect accepted'; fi
 assert_eq 'cannot reach GitHub (API: http_403) [E:core_download|cannot reach GitHub (API: http_403)]' "$CORE_ERROR" 'fallback: GitHub unreachable'
 if REDIRECT_TAG='v1/../x' core_pkg_resolve; then fail 'fallback: bad tag accepted'; fi
-assert_eq 'release sweep7125/xraywrt has no valid release tag' "$CORE_ERROR" 'fallback: tag checked'
+assert_eq 'release sweep7125/xraywrt-core has no valid release tag' "$CORE_ERROR" 'fallback: tag checked'
 unset API_ERROR
 pass 'pkgcore release lookup without the API'
 
@@ -246,7 +264,7 @@ assert_eq "1:1:0:$new_version" "$CORE_UPDATED:$CORE_VERIFIED:$CORE_RESTARTED:$CO
 assert_true 'package core installed' cmp -s "$tmpdir/pkgcore-core" "$XRAY_BIN"
 assert_file_contains "$tmpdir/apk.log" "apk add --allow-untrusted $CORE_TMP_DIR/new.apk" 'apk add --allow-untrusted'
 jq -e --arg a "$new_asset" --arg s "$new_sha" --argjson z "$new_size" --arg v "$new_version" \
-	'(keys | sort) == ["asset","installed_at","sha256","size","source","tag","version"] and .tag == "v0.2.0" and .asset == $a and .sha256 == $s and .size == $z and .version == $v and .source == "package"' \
+	'(keys | sort) == ["asset","installed_at","repo","sha256","size","source","tag","version"] and .tag == "v0.2.0" and .asset == $a and .sha256 == $s and .size == $z and .version == $v and .source == "package" and .repo == "sweep7125/xraywrt-core"' \
 	"$CORE_JSON_FILE" >/dev/null || fail "package core.json: $(cat "$CORE_JSON_FILE")"
 assert_false 'stopped service: no service calls' test -e "$tmpdir/svc.log"
 assert_false 'RAM stage removed' test -e "$CORE_TMP_DIR"
@@ -264,12 +282,19 @@ assert_eq "0:$new_version" "$CORE_UPDATED:$CORE_VERSION" 'up to date without cor
 assert_false 'up to date without core.json: no download' grep -q "$new_asset" "$tmpdir/fetch.log"
 assert_false 'up to date without core.json: apk untouched' grep -qE '^apk (add|del)' "$tmpdir/apk.log"
 jq -e --arg a "$new_asset" --arg s "$new_sha" --argjson z "$new_size" --arg v "$new_version" \
-	'(keys | sort) == ["asset","installed_at","sha256","size","source","tag","version"] and .tag == "v0.2.0" and .asset == $a and .sha256 == $s and .size == $z and .version == $v and .source == "package"' \
+	'(keys | sort) == ["asset","installed_at","repo","sha256","size","source","tag","version"] and .tag == "v0.2.0" and .asset == $a and .sha256 == $s and .size == $z and .version == $v and .source == "package" and .repo == "sweep7125/xraywrt-core"' \
 	"$CORE_JSON_FILE" >/dev/null || fail "core.json written for the installed package: $(cat "$CORE_JSON_FILE" 2>&1)"
 # An existing record is left alone.
 printf '{"source":"package","tag":"keep"}\n' >"$CORE_JSON_FILE"
 core_update || fail "up to date with core.json: $CORE_ERROR"
 assert_eq '{"source":"package","tag":"keep"}' "$(cat "$CORE_JSON_FILE")" 'an existing core.json is not rewritten'
+release_tag=v0.3.0
+reset_logs
+core_update || fail "same version after tag move: $CORE_ERROR"
+assert_eq '{"source":"package","tag":"keep"}' "$(cat "$CORE_JSON_FILE")" 'tag move does not rewrite legacy record'
+assert_false 'tag move does not reinstall' grep -qE '^apk (add|del)' "$tmpdir/apk.log"
+assert_false 'tag move does not download package' grep -q "$new_asset" "$tmpdir/fetch.log"
+release_tag=v0.2.0
 pass 'same-version package without core.json gets its record'
 
 # Real apk add at the same version is a no-op, even with a missing binary.
@@ -386,7 +411,7 @@ ready_with=pkgcoreold
 if core_update 2>/dev/null; then fail 'core that does not start accepted'; fi
 assert_eq 'new core failed to start, previous core restored [E:core_restored|new core failed to start]' "$CORE_ERROR" 'normal rollback text'
 assert_eq $'stop\nstart pkgcore\nstop\nstart pkgcoreold' "$(cat "$tmpdir/svc.log")" 'old core started again'
-assert_file_contains "$tmpdir/fetch.log" "$repo_url/v0.1.0/$old_asset" 'old .apk downloaded for the rollback'
+assert_file_contains "$tmpdir/fetch.log" "$legacy_url/v0.1.0/$old_asset" 'old .apk downloaded for the rollback'
 assert_old_pkg_kept 'normal rollback'
 install_old_pkg
 ready_with=pkgcoreold
@@ -437,7 +462,7 @@ assert_eq '1:1' "$CORE_UPDATED:$CORE_RESTARTED" 'tight path restarts the service
 assert_eq "apk del xraywrt-core
 apk add --allow-untrusted $CORE_TMP_DIR/new.apk" "$(grep -E '^apk (add|del)' "$tmpdir/apk.log")" 'del old, then add new'
 assert_eq $'stop\nstart pkgcore' "$(cat "$tmpdir/svc.log")" 'stop before apk del'
-assert_file_contains "$tmpdir/fetch.log" "$repo_url/v0.1.0/$old_asset" 'old .apk fetched before removing the package'
+assert_file_contains "$tmpdir/fetch.log" "$legacy_url/v0.1.0/$old_asset" 'old .apk fetched before removing the package'
 assert_true 'tight path installed the new core' cmp -s "$tmpdir/pkgcore-core" "$XRAY_BIN"
 assert_false 'RAM stage removed' test -e "$CORE_TMP_DIR"
 install_old_pkg
@@ -566,7 +591,7 @@ check
 jq -e '.update_available == true and has("channel_changed") == false' <<<"$result" >/dev/null || fail "channel core: $result"
 API_ERROR=http_401 check
 assert_eq 1 "$rc" 'pkgcore check failure'
-jq -e '.update_available == false and .error == "cannot read the latest release of sweep7125/xraywrt (GitHub API: http_401) [E:core_download|cannot read the latest release of sweep7125/xraywrt (GitHub API: http_401)]"' <<<"$result" >/dev/null || fail "check error: $result"
+jq -e '.update_available == false and .error == "cannot read the latest release of sweep7125/xraywrt-core (GitHub API: http_401) [E:core_download|cannot read the latest release of sweep7125/xraywrt-core (GitHub API: http_401)]"' <<<"$result" >/dev/null || fail "check error: $result"
 install_old_pkg
 fake_uci_set xraywrt.settings.core_channel XTLS/Xray-core
 check
@@ -593,9 +618,9 @@ install_old_pkg
 printf 'MemAvailable:   200000 kB\n' >"$MEMINFO_FILE"
 free_kb="$tight_kb" old_available=0
 if core_update 2>/dev/null; then fail 'tight without any old .apk route accepted'; fi
-assert_eq "$repo_url/v0.1.0/$old_asset
-https://gh-proxy.com/$repo_url/v0.1.0/$old_asset
-https://ghproxy.net/$repo_url/v0.1.0/$old_asset" "$(grep -F "$old_asset" "$tmpdir/fetch.log")" 'old .apk: every route tried'
+assert_eq "$legacy_url/v0.1.0/$old_asset
+https://gh-proxy.com/$legacy_url/v0.1.0/$old_asset
+https://ghproxy.net/$legacy_url/v0.1.0/$old_asset" "$(grep -F "$old_asset" "$tmpdir/fetch.log")" 'old .apk: every route tried'
 assert_eq "cannot download the installed package $old_asset for a rollback (http_404); --no-rollback installs without it" "$CORE_ERROR" 'error of the github.com route'
 assert_old_pkg_kept 'old .apk routes'
 pass 'rollback .apk over GitHub proxies'

@@ -97,7 +97,6 @@ function details(st, profile, diagnostics) {
 		[ _('Provider settings'), Object.keys(profile?.provider || {}).join(', ') || _('none') ],
 		[ _('Provider lists'), profile?.provider_lists ? _('yes') : _('no') ],
 		[ _('Client interfaces'), (st.interfaces || []).join(', ') ],
-		[ _('List entries'), _('VPN %d, devices %d, direct %d, direct devices %d').format(st.lists?.dst || 0, st.lists?.src || 0, st.lists?.direct || 0, st.lists?.direct_src || 0) ],
 		[ _('Routing table'), st.route?.table ? _('%s (priority %s)').format(st.route.table, st.route.priority) : _('not active') ],
 		[ _('Starts at boot'), st.enabled ? _('yes') : _('no') ]
 	];
@@ -105,9 +104,7 @@ function details(st, profile, diagnostics) {
 	if (typeof diagnostics?.xray_rss_kb === 'number')
 		rows.push([ _('Xray memory'), _('%d MB').format(Math.round(diagnostics.xray_rss_kb / 1024)) ]);
 	if (typeof diagnostics?.tmp_xraywrt_kb === 'number')
-		rows.push([ _('XrayWRT temporary files (runtime config, downloads)'), _('%d MB').format(Math.round(diagnostics.tmp_xraywrt_kb / 1024)) ]);
-	if (typeof diagnostics?.tmp_free_kb === 'number')
-		rows.push([ _('Free temporary storage'), _('%d MB').format(Math.floor(diagnostics.tmp_free_kb / 1024)) ]);
+		rows.push([ _('XrayWRT temporary files (runtime config, downloads)'), api.formatBytes(diagnostics.tmp_xraywrt_kb * 1024) ]);
 	return api.infoGrid(rows);
 }
 
@@ -146,8 +143,7 @@ return view.extend(api.guardView({
 
 		const copy = E('button', { class: 'cbi-button', type: 'button' }, text(_('Copy report')));
 		copy.addEventListener('click', () => api.busy(copy, async () => {
-			const logs = await api.readLarge('logs-json', '100').catch(() => ({ available: false }));
-			const report = api.reportText({ status: st, diagnostics, checks: checks(st, diagnostics), logs });
+			const report = api.reportText({ status: st, diagnostics });
 			if (navigator.clipboard)
 				await navigator.clipboard.writeText(report);
 			else {

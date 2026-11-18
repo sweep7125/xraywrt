@@ -349,26 +349,51 @@ async function waitJob(api, id, op) {
 }
 
 function reportText(data) {
-	const st = data.status || {};
-	const diagnostics = data.diagnostics || {};
-	// Allowlist support fields: never serialize subscription data or either configuration.
-	const report = {
-		version: st.version, core: st.core, mode: st.mode,
-		state: st.state || (st.running ? 'running' : 'stopped'),
-		degraded_reason: st.degraded_reason,
-		warnings: (st.warnings || []).map(errorText),
-		errors: (st.errors || []).map(errorText),
-		checklist: data.checks || [],
-		flash_free_kb: diagnostics.flash_free_kb,
-		ram_available_kb: diagnostics.ram_available_kb
-	};
-	const logs = data.logs?.available ? (data.logs.lines || []).slice(-100).join('\n') : _('System log is not available.');
-	const redact = value => value
-		.replace(/https?:\/\/[^\s"'<>]+/gi, '***')
-		.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '***')
-		.replace(/password=(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\S+)/gi, 'password=***');
-	return JSON.stringify(report, (key, value) => typeof value === 'string' ? redact(value) : value, 2)
-		+ '\n\n' + _('Log') + ':\n' + redact(logs);
+	const st = data.status || {}, d = data.diagnostics || {};
+	const version = v => typeof v === 'string' && /^v?[0-9]+(?:\.[0-9]+){1,4}(?:-[0-9]+)?(?:-r[0-9]+)?$/.test(v) ? v : '—';
+	const state = st.state || (st.running ? 'running' : 'stopped');
+	const states = { running: _('Service is running'), stopped: _('XrayWRT is not running'),
+		failed: _('Stopped because of an error.'), starting: _('Starting…'), degraded: _('Degraded') };
+	const rows = [ _('XrayWRT version') + ': ' + version(st.version),
+		_('Core version') + ': ' + version(st.core),
+		_('Traffic mode') + ': ' + (['direct-first', 'proxy-first'].includes(st.mode) ? modeLabel(st.mode) : '—'),
+		_('Service') + ': ' + (states[state] || '—') ];
+	const problems = [];
+	const add = (label, hint) => problems.push('- ' + label + '\n  ' + hint);
+	const hasCode = (message, code) => new RegExp(' \\[E:' + code + '(?:\\|[^\\]]*)?\\]$').test(String(message || '').trim());
+	const settingsInvalid = (st.errors || []).some(error => hasCode(error, 'settings_invalid'));
+	const dnsPortBusy = hasCode(d.dns_guard_error, 'dns_port_busy');
+	if (settingsInvalid)
+		add(_('XrayWRT settings are damaged.'), _('Save the Advanced page again or reinstall the package.'));
+	if (dnsPortBusy)
+		add(_('Port 53 is occupied.'), _('Disable the other DNS service.'));
+	if (!st.core_installed)
+		add(_('Xray core is not installed'), _('Open the Updates page and install the core.'));
+	else if (st.config_valid === false)
+		add(_('Configuration has errors'), _('Update the subscription or fix the configuration on the Advanced page.'));
+	else if ((state === 'stopped' || state === 'failed') && !settingsInvalid && !dnsPortBusy)
+		add(_('XrayWRT is not running'), _('Press Start on Home.'));
+	if (st.subscription_insecure)
+		add(_('The subscription link uses plain http'), _('Anyone on the way can change your configuration. Ask your provider for an https link.'));
+	if (state === 'degraded') {
+		if (st.degraded_reason === 'observatory')
+			add(_('The VPN server is not responding (provider check)'), _('Internet traffic goes directly until the VPN recovers.'));
+		else
+			add(_('Xray DNS does not answer: traffic goes direct until it recovers'), _('Xray cannot resolve names: check that the VPN servers and DNS servers in the config are reachable.'));
+	}
+	else if (state === 'running' && st.dns_ok === false)
+		add(_('Xray does not answer DNS queries'), _('Xray cannot resolve names: check that the VPN servers and DNS servers in the config are reachable.'));
+	if ((state === 'running' || state === 'degraded') && !st.policy_active)
+		add(_('Traffic rules are not active'), _('Restart the service; if it persists, see the log.'));
+	if ((st.custom_dns_servers || []).length)
+		add(_('dnsmasq has its own upstream servers'), _('These servers answer next to Xray, so some sites may bypass the VPN. Remove them from Network → DHCP and DNS.'));
+	if ((d.conflicts || []).length)
+		add(_('Other VPN packages are installed'), _('These packages also change DNS and the firewall. Use only one VPN package at a time.'));
+	if (typeof d.flash_free_kb === 'number' && isFinite(d.flash_free_kb) && d.flash_free_kb < 5120)
+		add(_('Little free flash: %d MB').format(Math.floor(d.flash_free_kb / 1024)), _('Free some space or the core update may fail.'));
+	if (typeof d.ram_available_kb === 'number' && isFinite(d.ram_available_kb) && d.ram_available_kb < 20480)
+		add(_('Little free memory: %d MB').format(Math.floor(d.ram_available_kb / 1024)), _('Xray may be stopped by the system when memory runs out. Stop other services or use a smaller configuration.'));
+	return rows.join('\n') + '\n\n' + (problems.length ? problems.join('\n') : _('No known problems found.'));
 }
 
 // Add or drop `name` in the list of options the user keeps (provider_override).

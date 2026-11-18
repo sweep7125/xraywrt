@@ -58,9 +58,6 @@ msgstr "Режим"
 msgid "Client interfaces"
 msgstr "Интерфейсы клиентов"
 
-msgid "List entries"
-msgstr "Записи в списках"
-
 msgid "Routing table"
 msgstr "Таблица маршрутизации"
 
@@ -325,9 +322,6 @@ msgstr "По расписанию подписки: каждые %d ч."
 msgid "none"
 msgstr "нет"
 
-msgid "VPN %d, devices %d, direct %d, direct devices %d"
-msgstr "VPN %d, устройства %d, напрямую %d, устройства напрямую %d"
-
 msgid "%s (priority %s)"
 msgstr "%s (приоритет %s)"
 
@@ -556,9 +550,6 @@ msgstr "При передаче конфигурацию могут подмен
 msgid "Automatic update"
 msgstr "Автоматическое обновление"
 
-msgid "Free temporary storage"
-msgstr "Свободно во временном хранилище"
-
 msgid "Cancel"
 msgstr "Отмена"
 
@@ -777,12 +768,6 @@ msgstr "Проверить обновления"
 
 msgid "Update the core"
 msgstr "Обновить ядро"
-
-msgid "Free flash"
-msgstr "Свободно на флеше"
-
-msgid "Free memory"
-msgstr "Свободно в памяти"
 
 msgid "Not enough free memory to download this core."
 msgstr "Не хватает оперативной памяти, чтобы скачать это ядро."
@@ -1483,8 +1468,8 @@ msgstr "«%s» будет удалена с роутера вместе с со�
 msgid "Could not download the Xray core from GitHub. Check the router's internet connection, or install the core by hand: apk add --allow-untrusted xraywrt-core_*.apk. Details: %s"
 msgstr "Не удалось скачать ядро Xray с GitHub. Проверьте доступ роутера в интернет или установите ядро вручную: apk add --allow-untrusted xraywrt-core_*.apk. Подробности: %s"
 
-msgid "If the router cannot reach GitHub, copy xraywrt-core_*.apk from the XrayWRT release to the router and install it over SSH. The service restarts by itself."
-msgstr "Если роутер не может подключиться к GitHub, скопируйте xraywrt-core_*.apk из релиза XrayWRT на роутер и установите по SSH. Служба перезапустится сама."
+msgid "If the router cannot reach GitHub, copy xraywrt-core_*.apk from the xraywrt-core release to the router and install it over SSH. The service restarts by itself."
+msgstr "Если роутер не может подключиться к GitHub, скопируйте xraywrt-core_*.apk из релиза xraywrt-core на роутер и установите по SSH. Служба перезапустится сама."
 
 msgid "The subscription asks for a rule database update schedule \"%s\" that is invalid or more frequent than daily; %s is used instead."
 msgstr "Подписка задаёт расписание обновления баз правил «%s», которое некорректно или чаще раза в сутки; вместо него используется %s."
@@ -1608,3 +1593,54 @@ msgstr "Пересылка прочих DNS-запросов выключена:
 
 msgid "DNS forwarding protection could not be saved or restored. Free storage and review Advanced DNS before trying again."
 msgstr "Не удалось сохранить или восстановить защитное отключение пересылки DNS. Освободите место и проверьте настройки в «Дополнительно → DNS» перед повторной попыткой."
+
+msgid "dnsmasq has its own upstream servers"
+msgstr "В dnsmasq настроены собственные вышестоящие серверы"
+
+msgid "Other VPN packages are installed"
+msgstr "Установлены другие пакеты VPN"
+
+msgid "None"
+msgstr "Нет"
+
+msgid "Remote links: %d"
+msgstr "Ссылок на списки: %d"
+
+msgid "Preview truncated."
+msgstr "Показана только часть списка."
+
+msgid "Configured subscription address sources only, not personal rules or live effective rules. Remote links are not expanded."
+msgstr "Только источники адресов из подписки, без личных правил и действующих правил маршрутизации. Списки по ссылкам не раскрываются."
+
+msgid "VPN addresses (Only selected sites via VPN mode)"
+msgstr "Адреса через VPN (режим «Через VPN только выбранное»)"
+
+msgid "Direct addresses (Everything via VPN except exclusions mode)"
+msgstr "Адреса напрямую (только в режиме «Всё через VPN, кроме исключений»)"
+
+msgid "Subscription lists are unavailable. Reload the page to try again."
+msgstr "Списки подписки недоступны. Обновите страницу и попробуйте снова."
+
+msgid "Subscription lists"
+msgstr "Списки подписки"
+
+msgid "Hide subscription lists"
+msgstr "Скрыть списки подписки"
+
+msgid "Degraded"
+msgstr "Работает с ограничениями"
+
+msgid "No known problems found."
+msgstr "Известных проблем не обнаружено."
+
+msgid "XrayWRT settings are damaged."
+msgstr "Настройки XrayWRT повреждены."
+
+msgid "Save the Advanced page again or reinstall the package."
+msgstr "Сохраните страницу дополнительных настроек ещё раз или переустановите пакет."
+
+msgid "Port 53 is occupied."
+msgstr "Порт 53 занят."
+
+msgid "Disable the other DNS service."
+msgstr "Отключите другую службу DNS."

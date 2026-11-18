@@ -169,7 +169,20 @@ return view.extend({
 				].map(([ example, meaning ]) => E('li', [ E('code', text(example)), ' — ', meaning ]))),
 				E('p', text(_('Other site forms: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Comments start with #. Saving is refused until every line is valid.')))
 			]);
-			return E('div', {}, [ node, E('div', { class: 'cbi-value-description' }, where), api.toggle(_('Entry format'), _('Hide entry format'), format) ]);
+			const sources = this.profile.provider_sources;
+			const listPreview = (title, source) => E('div', [
+				E('strong', text(title)),
+				E('pre', text((source.addresses || []).join('\n') || _('None'))),
+				E('p', text(_('Remote links: %d').format(source.links || 0))),
+				...(source.truncated ? [ E('p', text(_('Preview truncated.'))) ] : [])
+			]);
+			const subscriptionLists = E('div', { class: 'cbi-value-description' }, sources ? [
+				E('p', text(_('Configured subscription address sources only, not personal rules or live effective rules. Remote links are not expanded.'))),
+				listPreview(_('VPN addresses (Only selected sites via VPN mode)'), sources.vpn || {}),
+				listPreview(_('Direct addresses (Everything via VPN except exclusions mode)'), sources.direct || {})
+			] : [ E('p', text(_('Subscription lists are unavailable. Reload the page to try again.'))) ]);
+			return E('div', {}, [ node, E('div', { class: 'cbi-value-description' }, where), api.toggle(_('Entry format'), _('Hide entry format'), format),
+				api.toggle(_('Subscription lists'), _('Hide subscription lists'), subscriptionLists) ]);
 		});
 		return o;
 	},
