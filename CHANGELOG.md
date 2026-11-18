@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Left-align the subscription-pinned server on Home, with even vertical spacing.
+
 ## 0.1.2
 
 - Split Help reports into a short summary and a detailed, local download. The detailed file can contain credentials and requires confirmation.
