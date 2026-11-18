@@ -112,8 +112,12 @@ without a backup. Confirm only if you accept the recovery risk.
 1. Open LuCI at your router address and choose **Services → XrayWRT → Home → Stop**,
    or run `service xraywrt stop` over SSH.
 2. Stop removes XrayWRT DNS redirection and routing policy, restoring direct access.
-3. Check **Help** or run `logread -e xraywrt`. Review reports for sensitive data
-   before sharing them; arbitrary logs may contain secrets.
+3. Check **Help** or run `logread -e xraywrt`. **Copy summary** leaves out all
+   lists, configuration and raw log lines. **Download detailed report** saves a
+   local text file with settings, personal rules, the current runtime config if
+   available, and up to 1,000 recent XrayWRT and Xray log lines at any recorded
+   level. The detailed file does not mask credentials. Share it privately and
+   only with someone you trust.
 4. To prevent restart on reboot, disable **Start on boot** or run
    `service xraywrt disable`.
 

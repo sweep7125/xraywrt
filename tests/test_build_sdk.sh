@@ -378,7 +378,8 @@ workflow_dir="$(mktemp -d)"
 trap 'rm -rf "$workflow_dir"' EXIT
 cp "$ROOT_DIR/Makefile" "$workflow_dir/Makefile"
 assert_contains 'version-check block extracted from release.yml' 'PKG_VERSION' "$version_script"
-for tag_case in v0.1.1:0:0 v0.1.1-rc1:0:1 v0.1.1-rc:1:- v0.1.2:1:- v0.1.1-beta1:1:-; do
+package_version="$(awk -F ':=' '/^PKG_VERSION:=/{print $2}' "$workflow_dir/Makefile")"
+for tag_case in "v$package_version:0:0" "v$package_version-rc1:0:1" "v$package_version-rc:1:-" v0.0.0:1:- "v$package_version-beta1:1:-"; do
  IFS=: read -r tag expected_rc expected_prerelease <<<"$tag_case"
  : >"$workflow_dir/env"; : >"$workflow_dir/output"
  tag_rc=0

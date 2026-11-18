@@ -1045,8 +1045,8 @@ msgstr "Текущий выход"
 msgid "Override"
 msgstr "Закреплённый выход"
 
-msgid "A pinned server is used even when it is down; there is no automatic fallback."
-msgstr "Закреплённый сервер используется, даже если он недоступен; автоматического перехода на резервный нет."
+msgid "Pinning disables automatic fallback."
+msgstr "При закреплении автоматического резерва нет."
 
 msgid "Configuration checked and applied without restarting Xray."
 msgstr "Конфигурация проверена и применена без перезапуска Xray."
@@ -1261,11 +1261,35 @@ msgstr "Не удалось проверить: сайт проверки нед
 msgid "(sites outside the VPN lists go direct)"
 msgstr "(сайты вне списков VPN идут напрямую)"
 
-msgid "Copy report"
-msgstr "Скопировать отчёт"
+msgid "Copy summary"
+msgstr "Скопировать сводку"
 
-msgid "Report copied."
-msgstr "Отчёт скопирован."
+msgid "Summary copied."
+msgstr "Сводка скопирована."
+
+msgid "Download detailed report"
+msgstr "Скачать подробный отчёт"
+
+msgid "This file may contain private keys, passwords and tokens, and personal network information. Share it only with someone you trust. It is not sent automatically."
+msgstr "Файл может содержать приватные ключи, пароли, токены и личные данные сети. Отправляйте его только тем, кому доверяете. Автоматической отправки нет."
+
+msgid "Download"
+msgstr "Скачать"
+
+msgid "Router model"
+msgstr "Модель роутера"
+
+msgid "Not available"
+msgstr "Недоступно"
+
+msgid "My rules and device lists"
+msgstr "Мои правила и списки устройств"
+
+msgid "Running configuration"
+msgstr "Рабочая конфигурация"
+
+msgid "Log (up to 1000 recent lines)"
+msgstr "Журнал (до 1000 последних строк)"
 
 msgid "Could not copy the report. Allow clipboard access and try again."
 msgstr "Не удалось скопировать отчёт. Разрешите доступ к буферу обмена и повторите попытку."
@@ -1609,8 +1633,8 @@ msgstr "Ссылок на списки: %d"
 msgid "Preview truncated."
 msgstr "Показана только часть списка."
 
-msgid "Configured subscription address sources only, not personal rules or live effective rules. Remote links are not expanded."
-msgstr "Только источники адресов из подписки, без личных правил и действующих правил маршрутизации. Списки по ссылкам не раскрываются."
+msgid "Read-only preview from the subscription. Remote lists are not expanded."
+msgstr "Данные подписки · только просмотр. Списки по ссылкам не раскрываются."
 
 msgid "VPN addresses (Only selected sites via VPN mode)"
 msgstr "Адреса через VPN (режим «Через VPN только выбранное»)"

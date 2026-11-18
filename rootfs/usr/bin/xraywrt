@@ -8,7 +8,7 @@ usage() {
 	cat >&2 <<'EOF'
 Usage: xraywrt <command>
 Service:  prepare | run-service | wait-stopped | stop-now | recover | reload | migrate | uninstall
-Config:   read-config [tmp] | runtime-config | save-config <tmp> | restore-config
+Config:   read-config [tmp] | runtime-config | report-config | save-config <tmp> | restore-config
           profiles | config-check [tmp] | check-ip
 Subscr.:  subscription-json [--mask] | set-subscription <url> <0|1> | update-subscription [url]
           add-subscription <url> | use-subscription <id> | delete-subscription <id>
@@ -60,6 +60,10 @@ read-config) config_read_json "${1:-}" ;;
 runtime-config)
 	need_args $# 0
 	runtime_config_json
+	;;
+report-config)
+	need_args $# 0
+	[ -r "$RUNTIME_CONFIG" ] && xraywrt-json build config <"$RUNTIME_CONFIG"
 	;;
 save-config)
 	need_args $# 1
@@ -146,5 +150,9 @@ status-json) status_json ;;
 profile-json) profile_json ;;
 service-state-json) service_state_json ;;
 logs-json) logs_json "${1:-200}" ;;
+report-logs)
+	need_args $# 0
+	logs_json 1000 full
+	;;
 *) usage ;;
 esac

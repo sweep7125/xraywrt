@@ -163,6 +163,7 @@ function provider_preview(s) {
 }
 function numeric(v) { return type(v) == 'object' && proto(v) == decimal ? +v.text : v; }
 function opt(v) { return v == null || v == '' ? null : v; }
+function flag(v) { return v == '1' ? true : v == '0' ? false : null; }
 // Spec 15: secret values in the runtime view.
 const SECRETS = ['id', 'password', 'privateKey', 'publicKey', 'shortId', 'pass', 'user', 'secretKey', 'preSharedKey'];
 function redact(v) {
@@ -219,6 +220,10 @@ function build(shape, a) {
 		core_installed: a.core != '', subscription_configured: a.url != '',
 		subscription_insecure: index(lc(a.url), 'http://') == 0,
 		config_valid: a.config_valid, config_backup: a.config_backup, config_error: a.config_error, dns_mode: a.dns_mode, dns_ok: a.dns_ok, policy_active: a.policy,
+		flags: {
+			dns_hijack: flag(a.dns_hijack), disable_quic: flag(a.disable_quic), bypass_ntp: flag(a.bypass_ntp),
+			bypass_subscription_dns: flag(a.bypass_subscription_dns), block_client_ipv6: flag(a.block_client_ipv6), enabled: a.enabled
+		},
 		mode: a.mode, block_client_ipv6: a.block_client_ipv6 == '1', interfaces: lines(a.interfaces, ' '), custom_dns_servers: lines(a.custom, ' '),
 		lists: {dst: num(a.dst), src: num(a.src), direct: num(a.direct), direct_src: num(a.direct_src)},
 		route: {table: a.table, priority: a.priority}, errors: length(a.errors) ? [a.errors] : [],
@@ -237,7 +242,7 @@ function build(shape, a) {
 	case 'diagnostics': return {
 		conflicts: lines(a.conflicts), flash_free_kb: num(a.flash), tmp_xraywrt_kb: num(a.tmp_xraywrt),
 		ram_available_kb: num(a.ram), xray_rss_kb: num(a.rss),
-		dns_guard_error: a.dns_guard_error || null,
+		router_model: opt(a.model), dns_guard_error: a.dns_guard_error || null,
 		config_test: {valid: a.config_valid, output: lines(a.config_output)}
 	};
 	case 'logs': return {available: a.available ?? true, lines: lines(a.l)};

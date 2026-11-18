@@ -182,6 +182,8 @@ status_json() {
 		--arg mode "${POLICY_MODE:-}" \
 		--arg provider "$(settings_provider_entries)" --arg overrides "$PROVIDER_OVERRIDES" \
 		--arg block_client_ipv6 "${BLOCK_CLIENT_IPV6:-0}" \
+		--arg dns_hijack "${DNS_HIJACK:-}" --arg disable_quic "${DISABLE_QUIC:-}" \
+		--arg bypass_ntp "${BYPASS_NTP:-}" --arg bypass_subscription_dns "${BYPASS_SUBSCRIPTION_DNS:-}" \
 		--arg url "${SUBSCRIPTION_URL:-}" \
 		--arg custom "$(dns_global_custom_servers | tr '\n' ' ')" \
 		--arg table "${ROUTE_TABLE:-}" \
@@ -265,7 +267,8 @@ $package
 	if pid="$(service_pid)"; then
 		rss="$(awk '$1 == "VmRSS:" && $2 ~ /^[0-9]+$/ { print $2; exit }' "/proc/$pid/status" 2>/dev/null)"
 	fi
-	xraywrt-json build diagnostics --arg conflicts "$conflicts" --arg flash "$flash" --arg ram "$ram" \
+	xraywrt-json build diagnostics --arg model "$(head -c 256 /tmp/sysinfo/model 2>/dev/null)" \
+		--arg conflicts "$conflicts" --arg flash "$flash" --arg ram "$ram" \
 		--arg rss "$rss" --arg tmp_xraywrt "$tmp_xraywrt" \
 		--arg dns_guard_error "$(printf '%s' "$dns_error" | error_text)" \
 		--argjson config_valid "$(config_valid_json)" \
@@ -273,7 +276,7 @@ $package
 }
 
 logs_json() {
-	local limit="${1:-200}" lines=""
+	local limit="${1:-200}" detail="${2:-}"
 
 	is_uint "$limit" && [ "$limit" -ge 1 ] || limit=200
 	[ "$limit" -le 1000 ] || limit=1000
@@ -283,6 +286,7 @@ logs_json() {
 	}
 	# Drop every core line about DNS traffic to the core DNS port, not only the watchdog's
 	# probe (one line every 15 s buries everything else).
-	lines="$(logread 2>/dev/null | grep -iE 'xraywrt|xray' | grep -vF "handling DNS traffic to 127.0.0.1:$XRAY_DNS_PORT/udp" | tail -n "$limit")"
-	xraywrt-json build logs --arg l "$lines"
+	logread 2>/dev/null | grep -iE 'xraywrt|xray' | {
+		if [ "$detail" = full ]; then cat; else grep -vF "handling DNS traffic to 127.0.0.1:$XRAY_DNS_PORT/udp"; fi
+	} | tail -n "$limit" | xraywrt-json build logs --rawfile l /dev/stdin
 }

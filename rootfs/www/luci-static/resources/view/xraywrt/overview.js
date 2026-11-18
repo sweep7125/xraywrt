@@ -44,7 +44,8 @@ function balancerRow(balancer, index) {
 	const locked = readOnly || balancer.settable === false;
 	const hintId = 'balancer-pin-hint-' + index;
 	const select = E('select', { class: 'cbi-input-select', disabled: locked || null,
-		'aria-label': _('Override for %s').format(balancer.tag), 'aria-describedby': hintId }, [
+		'aria-label': _('Override for %s').format(balancer.tag),
+		'aria-describedby': balancer.settable === false ? hintId : 'balancer-fallback-hint' }, [
 		E('option', { value: '' }, text(_('Auto'))),
 		...balancer.targets.map(tag => E('option', { value: tag }, text(tag)))
 	]);
@@ -52,9 +53,6 @@ function balancerRow(balancer, index) {
 	const apply = balancerAction(balancer.tag, busy => { select.disabled = busy || locked; },
 		() => select.value = balancer.override || '');
 	select.addEventListener('change', () => apply(select, select.value));
-	const hints = [ _('A pinned server is used even when it is down; there is no automatic fallback.') ];
-	if (balancer.settable === false)
-		hints.push(_('A balancer tag with "=" cannot be pinned.'));
 	return E('tr', { class: 'tr' }, [
 		E('td', { class: 'td' }, text(balancer.tag)),
 		E('td', { class: 'td' }, [
@@ -64,7 +62,7 @@ function balancerRow(balancer, index) {
 		E('td', { class: 'td' }, text(balancer.fallback || '—')),
 		E('td', { class: 'td' }, balancer.targets.length === 1 ? text(_('One server, nothing to choose')) : [
 			E('div', { class: 'mw-row mw-picker' }, [ select ]),
-			E('div', { class: 'cbi-value-description', id: hintId }, hints.map(hint => E('div', text(hint))))
+			balancer.settable === false ? E('div', { class: 'cbi-value-description', id: hintId }, text(_('A balancer tag with "=" cannot be pinned.'))) : ''
 		])
 	]);
 }
@@ -94,10 +92,14 @@ function balancersSection() {
 			const stale = data.stale || [];
 			if (!data.balancers?.length && !stale.length)
 				return E('p', text(_('The configuration has no balancers.')));
-			return E('table', { class: 'table mw-balancers' }, [
-				E('tr', { class: 'tr table-titles' }, [ _('Balancer tag'), _('Current target'), _('Fallback'), _('Override') ].map(label => E('th', { class: 'th', scope: 'col' }, text(label)))),
-				...(data.balancers || []).map(balancerRow),
-				...stale.map(staleRow)
+			const balancers = data.balancers || [];
+			return E('div', [
+				E('table', { class: 'table mw-balancers' }, [
+					E('tr', { class: 'tr table-titles' }, [ _('Balancer tag'), _('Current target'), _('Fallback'), _('Override') ].map(label => E('th', { class: 'th', scope: 'col' }, text(label)))),
+					...balancers.map(balancerRow),
+					...stale.map(staleRow)
+				]),
+				balancers.some(b => b.targets.length !== 1 && b.settable !== false) ? E('p', { class: 'cbi-value-description', id: 'balancer-fallback-hint' }, text(_('Pinning disables automatic fallback.'))) : ''
 			]);
 		}).catch(() => E('div', { class: 'alert-message warning' }, text(_('Cannot read the balancer state from Xray.'))))
 			.then(node => { if (mine === request) content.replaceChildren(node); });
@@ -374,7 +376,7 @@ function warningsSection(status) {
 // is a normal Save & Apply, and the reload restarts Xray with the new profile.
 function profileSection(status, profiles, sub) {
 	if (status.profile?.pinned)
-		return E('div', { class: 'cbi-section' }, [ E('p', text(_('Server: %s (from subscription)').format(status.profile.selected ?? ''))) ]);
+		return E('div', { class: 'cbi-section' }, [ E('p', { class: 'mw-pinned-server' }, text(_('Server: %s (from subscription)').format(status.profile.selected ?? ''))) ]);
 	if (!Array.isArray(profiles) || profiles.length < 2)
 		return '';
 	// selected is the running profile with control bytes shown as spaces;
@@ -493,7 +495,7 @@ return view.extend(api.guardView({
 			body.push(subscriptionSection(sub));
 		body.push(profileSection(status, profiles, sub));
 		if (status.has_balancers)
-			body.push(E('section', { class: 'cbi-section' }, [ balancersSection() ]));
+			body.push(E('section', { class: 'cbi-section mw-balancers-section' }, [ balancersSection() ]));
 		return E('div', { class: 'mw-page' }, body.filter(Boolean));
 	},
 

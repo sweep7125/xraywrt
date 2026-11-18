@@ -172,12 +172,13 @@ return view.extend({
 			const sources = this.profile.provider_sources;
 			const listPreview = (title, source) => E('div', [
 				E('strong', text(title)),
-				E('pre', text((source.addresses || []).join('\n') || _('None'))),
+				source.addresses?.length ? E('ul', { class: 'mw-provider-addresses', tabindex: '0', 'aria-label': title },
+					source.addresses.map(address => E('li', [ E('code', text(address)) ]))) : E('p', text(_('None'))),
 				E('p', text(_('Remote links: %d').format(source.links || 0))),
 				...(source.truncated ? [ E('p', text(_('Preview truncated.'))) ] : [])
 			]);
-			const subscriptionLists = E('div', { class: 'cbi-value-description' }, sources ? [
-				E('p', text(_('Configured subscription address sources only, not personal rules or live effective rules. Remote links are not expanded.'))),
+			const subscriptionLists = E('div', sources ? [
+				E('p', { class: 'mw-muted' }, text(_('Read-only preview from the subscription. Remote lists are not expanded.'))),
 				listPreview(_('VPN addresses (Only selected sites via VPN mode)'), sources.vpn || {}),
 				listPreview(_('Direct addresses (Everything via VPN except exclusions mode)'), sources.direct || {})
 			] : [ E('p', text(_('Subscription lists are unavailable. Reload the page to try again.'))) ]);

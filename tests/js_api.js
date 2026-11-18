@@ -740,7 +740,7 @@ test('Help copies report over plain HTTP without the Clipboard API', async () =>
   document: { body: { appendChild: node => { area = node; } }, execCommand: command => { assert.equal(command, 'copy'); return true; } }
  }).module;
  const page = help.render([{ version: '1.2.3' }, {}, {}]);
- await nodes(page).find(n => n.tag === 'button' && n.children.includes('Copy report')).click();
+ await nodes(page).find(n => n.tag === 'button' && n.children.includes('Copy summary')).click();
  assert(area && area.children.join('').includes('1.2.3')); assert(removed, 'temporary selection removed');
 });
 test('Help copies report without reading logs', async () => {
@@ -751,10 +751,46 @@ test('Help copies report without reading logs', async () => {
   E, api, view: { extend: v => v }, configuration: { render: () => E('div') },
   navigator: { clipboard: { writeText: async text => { copied = text; } } }
  }).module;
- const page = help.render([{ version: '1.0', mode: 'proxy-first' }, {}, {}]);
- const copy = nodes(page).find(n => n.tag === 'button' && n.children.includes('Copy report'));
- assert(copy, 'copy report action'); await copy.click();
- assert.deepEqual(reads, []); assert(copied.includes('1.0')); assert(!copied.includes('password=secret'));
+ const page = help.render([{ version: '1.0', mode: 'proxy-first', flags: { dns_hijack: true, disable_quic: false }, lists: { dst: 777 }, interfaces: ['private-lan'] }, { provider_sources: { vpn: { addresses: ['192.0.2.1'] } } }, { router_model: 'Test router' }]);
+ const copy = nodes(page).find(n => n.tag === 'button' && n.children.includes('Copy summary'));
+ assert(copy, 'copy summary action'); await copy.click();
+ assert.deepEqual(reads, []);
+ for (const value of ['1.0', 'Test router', 'dns_hijack: yes', 'disable_quic: no']) assert(copied.includes(value), value);
+ for (const value of ['password=secret', '192.0.2.1', '777', 'private-lan']) assert(!copied.includes(value), value);
+});
+test('Help downloads a local detailed report only after explicit confirmation', async () => {
+ for (const scenario of ['cancel', 'download', 'partial', 'readonly']) {
+  const { api } = setup(); let warning, report, download; const reads = [];
+  api.readOnly = () => scenario === 'readonly';
+  api.confirm = async (_title, message) => { warning = message; return scenario !== 'cancel'; };
+  api.readLarge = async (...args) => {
+   reads.push(args);
+   if (args[0] === 'report-config') {
+    if (scenario === 'partial') throw Error('secret transport error');
+    return { content: '{"privateKey":"test-key"}' };
+   }
+   if (args[0] === 'lists-json') return { rules: 'test.example core' };
+   if (args[0] === 'report-logs') return { available: true, lines: ['[Info] active', '[Debug] detail'] };
+   throw Error('unexpected command');
+  };
+  const help = h.evaluateLuCIModule('rootfs/www/luci-static/resources/view/xraywrt/help.js', {
+   E: (...args) => { const n = E(...args); if (n.tag === 'a') n.click = () => { download = n.attrs; }; return n; },
+   api, view: { extend: v => v }, configuration: { render: () => E('div') }, Blob,
+   URL: { createObjectURL: blob => { report = blob.text(); return 'blob:local'; }, revokeObjectURL() {} }, setTimeout: fn => fn()
+  }).module;
+  const page = help.render([{ version: '1.0' }, { provider_sources: { vpn: { addresses: ['192.0.2.1'] } } }, { router_model: 'Test router' }]);
+  const button = nodes(page).find(n => n.tag === 'button' && n.children.includes('Download detailed report'));
+  assert.deepEqual(reads, [], 'no collection on render');
+  if (scenario === 'readonly') { assert(!button); continue; }
+  assert(button); await button.click(); assert.match(warning, /keys, passwords and tokens/);
+  if (scenario === 'cancel') { assert.deepEqual(reads, []); assert(!download); continue; }
+  assert.deepEqual(reads, [['report-config'], ['lists-json'], ['report-logs']]);
+  assert.equal(download.href, 'blob:local'); assert.equal(download.download, 'xraywrt-report.txt');
+  const content = await report;
+  for (const value of ['Test router', '192.0.2.1', 'test.example core', '[Info] active', '[Debug] detail']) assert(content.includes(value), value);
+  if (scenario === 'partial') assert(content.includes('Not available') && !content.includes('secret transport error'));
+  else assert(content.includes('{"privateKey":"test-key"}'));
+ }
 });
 test('connect saved result after restart retains starting notice, partial retains warning', () => {
  const { api } = setup();

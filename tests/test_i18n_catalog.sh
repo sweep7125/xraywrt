@@ -53,7 +53,7 @@ for (const str of msgstrs) {
  assert(!/(?:сервис\s+XrayWRT|XrayWRT\s+сервис)/i.test(text), 'XrayWRT is a служба, not a сервис: ' + text);
 }
 
-for (const id of ['Everything via VPN except exclusions', 'Only selected sites via VPN', 'My rules', 'Devices via VPN', 'Devices always direct', 'Download the subscription directly', 'Server', 'Subscription', 'Updates', 'Help', 'Advanced', 'Check connection', 'Copy report']) assert(strings.has(id), 'UX wording missing: ' + id);
+for (const id of ['Everything via VPN except exclusions', 'Only selected sites via VPN', 'My rules', 'Devices via VPN', 'Devices always direct', 'Download the subscription directly', 'Server', 'Subscription', 'Updates', 'Help', 'Advanced', 'Check connection', 'Copy summary', 'Download detailed report']) assert(strings.has(id), 'UX wording missing: ' + id);
 for (const id of ['All traffic via proxy except exclusions', 'Only selected traffic via proxy', 'Addresses via proxy', 'Devices via proxy', 'Addresses always direct', 'Domains via fake-IP', 'Subscription server without Xray', 'Profile', 'Configuration', 'Config', 'Core', 'Diagnostics', 'Settings']) assert(!strings.has(id) && !catalog.has(id), 'old UX wording: ' + id);
 const proxyExceptions = [];
 for (const value of strings) assert(!/\b(?:proxy|proxied)\b/i.test(value) || proxyExceptions.includes(value), 'traffic wording still says proxy: ' + value);

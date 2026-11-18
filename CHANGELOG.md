@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Split Help reports into a short summary and a detailed, local download. The detailed file can contain credentials and requires confirmation.
+- Improve spacing on Home and Advanced, shorten the balancer warning, and make subscription address lists visibly read-only.
+
 ## 0.1.1
 
 - Use the separate public core release repository for core updates and rollback.

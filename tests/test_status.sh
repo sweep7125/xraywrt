@@ -47,6 +47,7 @@ echo ok >"$HEALTH_FILE"
 )
 json="$(status_json)"
 assert_eq "true|true|true|null" "$(jq -r '"\(.running)|\(.dns_ok)|\(.policy_active)|\(.config_valid)"' <<<"$json")" "checklist flags"
+assert_eq 'true|true|true' "$(jq -r '"\(.flags.dns_hijack)|\(.flags.disable_quic)|\(.flags.enabled)"' <<<"$json")" 'support summary allowlisted flags'
 assert_eq '["9.9.9.9"]' "$(jq -c .custom_dns_servers <<<"$json")" "only global custom servers reported"
 assert_eq 2 "$(jq .lists.dst <<<"$json")" "list count ignores comments"
 assert_eq "v1.19.32" "$(jq -r .core <<<"$json")" "core version"
@@ -110,6 +111,7 @@ logread() {
 	echo "xray[1]: [Info] [9] handling DNS traffic to 127.0.0.1:$XRAY_DNS_PORT/udp"
 }
 assert_eq "xray[1]: [Info] [8] handling DNS traffic to 127.0.0.1:9999/udp,xraywrt: started" "$(logs_json 10 | jq -r '.lines | join(",")')" "logs hide the watchdog DNS probe"
+assert_eq 4 "$(logs_json 10 full | jq '.lines | length')" 'detailed logs keep DNS messages'
 pass "logs hide watchdog probe"
 
 printf 'mode: rule\n' >"$XRAY_CONFIG"

@@ -2647,7 +2647,7 @@ seq(async () => {
  h.assertEq(select.attrs.disabled, null, 'enabled dropdown omits disabled attribute');
  h.assert(select.attrs['aria-label'].includes('<main>'), 'dropdown labelled with balancer tag');
  const hint = collect(page).find(n => n.attrs.id === select.attrs['aria-describedby']);
- h.assert(hint && texts(hint).includes('A pinned server is used even when it is down; there is no automatic fallback.'), 'pin warning visible and associated with control');
+ h.assert(hint && texts(hint).includes('Pinning disables automatic fallback.'), 'pin warning visible and associated with control');
  h.assertEq(collect(select).filter(n => n.tag === 'option').map(n => n.attrs.value).join(','), ',node-a,node-b', 'only candidates plus Auto');
  select.value = 'node-b'; await select.listeners.change();
  h.assertEq(JSON.stringify(calls.at(-1)), '["<main>","node-b"]', 'pin without restart');

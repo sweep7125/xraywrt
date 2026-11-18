@@ -74,7 +74,7 @@ all|conflicts)
  pass 'diagnostics conflicts'
  ;;&
 all|resources)
- assert_eq '{"conflicts":[],"flash_free_kb":51200,"ram_available_kb":30000,"xray_rss_kb":45000}' "$(diag | jq -c 'del(.tmp_xraywrt_kb, .tmp_free_kb, .config_test, .dns_guard_error)')" 'baseline diagnostics JSON unchanged except temporary storage fields'
+ assert_eq '{"conflicts":[],"flash_free_kb":51200,"ram_available_kb":30000,"xray_rss_kb":45000}' "$(diag | jq -c 'del(.tmp_xraywrt_kb, .tmp_free_kb, .config_test, .dns_guard_error, .router_model)')" 'baseline diagnostics JSON unchanged except temporary storage fields'
  assert_eq '[51200,30000,45000]' "$(diag | jq -c '[.flash_free_kb,.ram_available_kb,.xray_rss_kb]')" 'resource snapshot'
  rm "$tmpdir/pid"
  assert_eq null "$(diag | jq .xray_rss_kb)" 'stopped Xray has no RSS'

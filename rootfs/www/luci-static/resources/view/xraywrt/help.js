@@ -122,6 +122,28 @@ function configTest(diagnostics) {
 	]);
 }
 
+async function downloadReport(st, profile, diagnostics) {
+	const unavailable = _('Not available');
+	const section = (title, value) => '\n\n--- ' + title + ' ---\n' + (value ?? unavailable);
+	const json = value => value == null ? null : JSON.stringify(value, null, 2);
+	const read = (...args) => api.readLarge(...args).catch(() => null);
+	const runtime = await read('report-config');
+	const lists = await read('lists-json');
+	const logs = await read('report-logs');
+	const report = api.reportText({ status: st, diagnostics })
+		+ section(_('Details'), json({ status: st, profile, diagnostics }))
+		+ section(_('My rules and device lists'), json(lists))
+		+ section(_('Running configuration'), runtime?.content || null)
+		+ section(_('Log (up to 1000 recent lines)'), logs?.available ? logs.lines?.join('\n') || _('No XrayWRT log lines yet.') : null);
+	const url = URL.createObjectURL(new Blob([report + '\n'], { type: 'text/plain;charset=utf-8' }));
+	try {
+		E('a', { href: url, download: 'xraywrt-report.txt' }).click();
+	}
+	finally {
+		setTimeout(() => URL.revokeObjectURL(url), 30000);
+	}
+}
+
 return view.extend(api.guardView({
 	load: () => Promise.all([
 		api.read('status-json'),
@@ -141,7 +163,7 @@ return view.extend(api.guardView({
 
 		refresh.addEventListener('click', () => location.reload());
 
-		const copy = E('button', { class: 'cbi-button', type: 'button' }, text(_('Copy report')));
+		const copy = E('button', { class: 'cbi-button', type: 'button' }, text(_('Copy summary')));
 		copy.addEventListener('click', () => api.busy(copy, async () => {
 			const report = api.reportText({ status: st, diagnostics });
 			if (navigator.clipboard)
@@ -160,7 +182,13 @@ return view.extend(api.guardView({
 					copy.focus?.();
 				}
 			}
-			api.notify(_('Report copied.'));
+			api.notify(_('Summary copied.'));
+		}));
+		const download = !api.readOnly() && E('button', { class: 'cbi-button', type: 'button' }, text(_('Download detailed report')));
+		download && download.addEventListener('click', () => api.busy(download, async () => {
+			if (await api.confirm(_('Download detailed report'),
+				_('This file may contain private keys, passwords and tokens, and personal network information. Share it only with someone you trust. It is not sent automatically.'), _('Download')))
+				await downloadReport(st, profile, diagnostics);
 		}));
 
 		return E('div', { class: 'mw-page' }, [
@@ -170,7 +198,7 @@ return view.extend(api.guardView({
 			diagnostics?.unavailable != null ? E('div', { class: 'alert-message warning' }, [
 				E('div', text(_('Cannot load diagnostics: %s').format(diagnostics.unavailable))),
 				E('div', text(_('Reload the page to try again.'))) ]) : '',
-			E('div', { class: 'cbi-section' }, [ checklist(st, diagnostics), E('div', { class: 'mw-row' }, [ refresh, copy ]) ]),
+			E('div', { class: 'cbi-section' }, [ checklist(st, diagnostics), E('div', { class: 'mw-row' }, [ refresh, copy, download || '' ]) ]),
 			configuration.render({}, 'runtime'),
 			(st.errors || []).length ? E('div', { class: 'alert-message warning' }, text(st.errors.map(api.errorText).join('; '))) : '',
 			E('div', { class: 'cbi-section' }, [ E('h3', text(_('Details'))),

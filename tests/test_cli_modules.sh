@@ -124,6 +124,15 @@ for entry in "${read_sets[@]}"; do
  [ "$set" != balancers ] || assert_false 'no balancers-json alias' busybox ash "$ROOT_DIR/rootfs/usr/bin/xraywrt" balancers-json
 done
 
+for command in report-config report-logs; do
+ assert_false "$command is not available through the read ACL" env XRAYWRT_BACKEND=/bin/echo busybox ash "$ROOT_DIR/rootfs/usr/bin/xraywrt-read" "$command"
+done
+printf '\nRUNTIME_CONFIG=%s\n' "$tmpdir/state/report-runtime.json" >>"$tmpdir/full/constants.sh"
+assert_false 'report does not generate a preview when runtime config is absent' env XRAYWRT_LIB_DIR="$tmpdir/full" busybox ash "$cli" report-config
+printf '{"privateKey":"fixture-secret","int":9007199254740993}\n' >"$tmpdir/state/report-runtime.json"
+XRAYWRT_LIB_DIR="$tmpdir/full" busybox ash "$cli" report-config | jq -j .content >"$tmpdir/report-content"
+assert_true 'report returns the exact config bytes, unmasked' cmp -s "$tmpdir/state/report-runtime.json" "$tmpdir/report-content"
+
 # Follow project-function references transitively, including callbacks passed
 # to lock helpers. A newly introduced dependency must belong to the read set.
 node - "$XRAYWRT_LIB_DIR" <<'NODE'

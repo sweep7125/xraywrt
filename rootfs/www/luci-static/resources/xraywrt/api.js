@@ -27,7 +27,11 @@ const CSS = `
 .mw-grid > * { min-width: 0; overflow-wrap: anywhere; }
 .mw-grid select { max-width: 100%; }
 .mw-balancers { table-layout: fixed; width: 100%; }
-.mw-balancers td { overflow-wrap: anywhere; }
+.mw-balancers td, .mw-balancers th { overflow-wrap: anywhere; }
+.mw-pinned-server { text-align: center; margin: 8px 0; overflow-wrap: anywhere; }
+.mw-balancers-section { padding-block: 8px; }
+.mw-provider-addresses { margin-block: 8px; max-height: 14em; overflow: auto; list-style: none; padding-inline-start: 12px; }
+.mw-provider-addresses li { margin: 0; }
 .mw-check > div { padding: 4px 0; }
 .mw-mark { display: inline-block; min-width: 1.6em; }
 .mw-announce { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -35,7 +39,9 @@ const CSS = `
 .mw-toggle > .mw-row + * { margin-top: 12px; }
 :not(.mw-page) > .mw-toggle { margin-top: 12px; }
 .mw-job:empty { position: absolute; }
+.mw-settings > .mw-page { margin-top: 16px; }
 .mw-settings .cbi-value-field select { width: auto; min-width: min-content; max-width: 100%; }
+.mw-settings .cbi-value-description { overflow-wrap: anywhere; }
 .mw-picker > select { flex: 1 1 12em; min-width: 0; max-width: 100%; }
 .mw-picker + .cbi-value-description { margin-top: 4px; }
 .mw-code { width: 100%; min-height: 24em; }
@@ -269,8 +275,8 @@ async function json(bin, args) {
 async function readLarge(cmd, ...args) {
 	let reply;
 	try {
-		// The raw configuration (with keys) is for the write role only.
-		reply = await fs.exec_direct(cmd === 'read-config' ? WRITE : READ, [ cmd, ...args ], 'json');
+		// Config exports with keys are for the write role only.
+		reply = await fs.exec_direct(['read-config', 'report-config', 'report-logs'].includes(cmd) ? WRITE : READ, [ cmd, ...args ], 'json');
 	}
 	catch (e) {
 		if (e.name === 'SyntaxError')
@@ -354,10 +360,17 @@ function reportText(data) {
 	const state = st.state || (st.running ? 'running' : 'stopped');
 	const states = { running: _('Service is running'), stopped: _('XrayWRT is not running'),
 		failed: _('Stopped because of an error.'), starting: _('Starting…'), degraded: _('Degraded') };
-	const rows = [ _('XrayWRT version') + ': ' + version(st.version),
+	const model = typeof d.router_model === 'string' ? d.router_model.replace(/[\x00-\x1f\x7f]/g, ' ').trim() : '';
+	const rows = [ _('Router model') + ': ' + (model || '—'),
+		_('XrayWRT version') + ': ' + version(st.version),
 		_('Core version') + ': ' + version(st.core),
 		_('Traffic mode') + ': ' + (['direct-first', 'proxy-first'].includes(st.mode) ? modeLabel(st.mode) : '—'),
 		_('Service') + ': ' + (states[state] || '—') ];
+	for (const key of ['dns_hijack', 'disable_quic', 'bypass_ntp', 'bypass_subscription_dns', 'block_client_ipv6', 'enabled']) {
+		const value = st.flags?.[key];
+		if (typeof value === 'boolean')
+			rows.push(key + ': ' + (value ? _('yes') : _('no')));
+	}
 	const problems = [];
 	const add = (label, hint) => problems.push('- ' + label + '\n  ' + hint);
 	const hasCode = (message, code) => new RegExp(' \\[E:' + code + '(?:\\|[^\\]]*)?\\]$').test(String(message || '').trim());
