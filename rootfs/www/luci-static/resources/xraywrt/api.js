@@ -28,7 +28,7 @@ const CSS = `
 .mw-grid select { max-width: 100%; }
 .mw-balancers { table-layout: fixed; width: 100%; }
 .mw-balancers td, .mw-balancers th { overflow-wrap: anywhere; }
-.mw-pinned-server { text-align: center; margin: 8px 0; overflow-wrap: anywhere; }
+.mw-pinned-server { text-align: start; margin: 8px 0; overflow-wrap: anywhere; }
 .mw-balancers-section { padding-block: 8px; }
 .mw-provider-addresses { margin-block: 8px; max-height: 14em; overflow: auto; list-style: none; padding-inline-start: 12px; }
 .mw-provider-addresses li { margin: 0; }
