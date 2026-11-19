@@ -43,10 +43,26 @@ example.org core
 
 `direct` bypasses the VPN, `core` lets the configuration choose, and a server or
 balancer tag selects that target. Available tags appear under the list. The first
-matching rule generally wins; direct address bypasses take precedence over
-other overlapping addresses. If a tag disappears, affected rules are skipped
+matching emitted Xray site route wins. An unqualified site `core` rule does not
+stop later overlapping rules with different site matchers; avoid that overlap
+when the provider should decide. Bare address lists keep direct bypasses ahead of
+overlapping addresses. With address selectors, the first matching personal
+address rule wins. Provider direct and device bypasses still apply. If a tag
+disappears, affected rules are skipped
 and Home warns. Domain recognition can depend on provider sniffing; encrypted DNS
 or handshakes can limit it. Remote list URLs contain addresses, not site names.
+
+Append `;ports`, `;ports;tcp`, or `;ports;udp` to a site, IP address, subnet, or list
+URL to match destination ports and transport. Qualified sites use `direct` or a
+named target, not `core`. They apply only to traffic already intercepted and
+recognized by Xray; they do not add FakeDNS or capture traffic themselves. In
+direct-first mode use an address or subnet for exact capture. The `regexp:` form
+does not support qualifiers: semicolons remain part of the expression. For example,
+`203.0.113.0/24;443;udp direct` bypasses only UDP destination port 443.
+Use `;80,443,8000-8080` for several ports or ranges, and `;;udp` for UDP on any
+port. Without a protocol, a port selector matches TCP and UDP. A remote row
+inherits missing qualifiers from the URL, keeps its explicit ports, and is
+skipped if its explicit protocol conflicts with the URL's protocol.
 
 Device lists accept IP or MAC addresses. A changing private Wi-Fi MAC may stop
 matching; keep it fixed for this network. MAC matching requires the same local

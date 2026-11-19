@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Match provider and personal address rules by destination ports and TCP or UDP, including entries from cached lists. Qualified personal sites match traffic already intercepted and recognized by Xray.
+- Preserve the resolver's routing tag and answer filters for direct domain rules in direct-first mode. If that resolver fails, do not fall back to FakeDNS for those domains.
+
 ## 0.1.3
 
 - Left-align the subscription-pinned server on Home, with even vertical spacing.

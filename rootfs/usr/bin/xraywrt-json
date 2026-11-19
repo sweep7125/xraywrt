@@ -238,7 +238,7 @@ function build(shape, a) {
 	case 'profile':
 		let provider = {};
 		for (let row in lines(a.provider)) { let p = split(row, ' '); provider[p[0]] = p[1]; }
-		return {mode: a.mode, mode_source: a.mode_source, fake_enabled: a.fake_enabled == '1', direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0', dns: a.dns, provider, overrides: override_count(a), targets: lines(a.targets), dns_outbounds: a.dns_outbounds ?? [], dns_raw_lost: dns_raw_lost(a), reserved: lines(a.reserved), provider_lists: a.provider_lists == '1', provider_sources: a.preview_unavailable == '1' ? null : {vpn: provider_preview(a.vpn_preview), direct: provider_preview(a.direct_preview)}};
+		return {mode: a.mode, mode_source: a.mode_source, fake_enabled: a.fake_enabled == '1', direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0', dns: a.dns, provider, overrides: override_count(a), targets: lines(a.targets), sniff_skipped_targets: lines(a.sniff_skipped_targets), dns_outbounds: a.dns_outbounds ?? [], dns_raw_lost: dns_raw_lost(a), reserved: lines(a.reserved), provider_lists: a.provider_lists == '1', provider_sources: a.preview_unavailable == '1' ? null : {vpn: provider_preview(a.vpn_preview), direct: provider_preview(a.direct_preview)}};
 	case 'diagnostics': return {
 		conflicts: lines(a.conflicts), flash_free_kb: num(a.flash), tmp_xraywrt_kb: num(a.tmp_xraywrt),
 		ram_available_kb: num(a.ram), xray_rss_kb: num(a.rss),
@@ -469,7 +469,7 @@ try {
 		break;
 	}
 	case 'rules': {
-		// rules <check|entries|urls> <file> [direct|proxy]: My rules (spec 11). The
+		// rules <operation> <file> [argument]: My rules (spec 11). The
 		// valid target tags of the configuration come on stdin, one per line.
 		let op = shift(ARGV), file = shift(ARGV);
 		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
@@ -478,6 +478,11 @@ try {
 			for (let e in gen.check_rules(text, tags)) print(e.line, '\t', e.code, '\t', e.target || '-', '\t', e.text, '\n');
 		} else if (op == 'entries') {
 			for (let v in gen.rule_addresses(text, tags, shift(ARGV) == 'direct')) print(v, '\n');
+		} else if (op == 'packet-addresses') {
+			let remote = json(readfile(shift(ARGV)) ?? '{}');
+			let runtime = json(readfile(shift(ARGV) ?? '') ?? '{}');
+			let inbound = filter(runtime.inbounds ?? [], (ib) => ib.tag == 'xraywrt-tproxy4')[0];
+			for (let row in gen.rule_packet_addresses(text, tags, remote, readfile, inbound?.sniffing)) print(join(';', row), '\n');
 		} else if (op == 'routed-urls') {
 			for (let v in gen.rule_routed_urls(text, tags)) print(v, '\n');
 		} else if (op == 'urls') {

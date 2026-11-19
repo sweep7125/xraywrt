@@ -46,14 +46,14 @@ for awk_impl in default busybox; do
 done
 pass 'awk list port validation'
 
-# Device lists keep the port syntax; My rules have none.
+# Neither device lists nor My rules accepts an empty port qualifier without a protocol.
 for entry in '1.2.3.4;' '1.2.3.0/24;' '2001:db8::1;' '2001:db8::/32;' 'https://lists.example/list;'; do
  printf '%s\n' "$entry" >"$upload"
  assert_false "install rejects empty ports: $entry" lists_install - "$upload" - >"$tmpdir/out" 2>"$tmpdir/err"
  assert_file_contains "$tmpdir/err" "Invalid src entries: $entry" 'invalid entry reported before install'
  assert_false 'invalid upload not installed' test -s "$SRC_LIST_FILE"
  printf '%s core\n' "$entry" >"$upload"
- assert_false "My rules reject ports: $entry" lists_install "$upload" - - >"$tmpdir/out" 2>"$tmpdir/err"
+ assert_false "My rules reject empty ports: $entry" lists_install "$upload" - - >"$tmpdir/out" 2>"$tmpdir/err"
  assert_file_contains "$tmpdir/err" 'rules_bad_entry' 'invalid rule reported before install'
  assert_false 'invalid rules not installed' test -s "$RULES_FILE"
 done

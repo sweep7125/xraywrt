@@ -1549,8 +1549,8 @@ msgstr "Строка %s в «Моих правилах» (%s): нет цели �
 msgid "Choose which sites, addresses and devices go through the VPN and which go directly. These lists belong to the current subscription. Save & Apply applies the changes."
 msgstr "Выберите, какие сайты, адреса и устройства идут через VPN, а какие напрямую. Эти списки относятся к текущей подписке. «Сохранить и применить» применяет изменения."
 
-msgid "One rule per line: a site, an IP address or subnet, or a link to a list of addresses, then a space and where it goes. The first line that matches wins. Write a site as its name, not its IP address."
-msgstr "Одно правило в строке: сайт, IP-адрес или подсеть либо ссылка на список адресов, затем пробел и куда это направить. Срабатывает первая подходящая строка. Сайт указывайте именем, а не IP."
+msgid "One rule per line: a site, an IP address or subnet, or a link to a list of addresses, then a space and where it goes. The first emitted Xray site route that matches wins. Write a site as its name, not its IP address."
+msgstr "Одно правило в строке: сайт, IP-адрес или подсеть либо ссылка на список адресов, затем пробел и куда это направить. Применяется первый созданный маршрут Xray для сайта, который совпал. Сайт указывайте именем, а не IP."
 
 msgid "straight to the internet"
 msgstr "сразу в интернет"
@@ -1570,8 +1570,8 @@ msgstr "Скрыть цели"
 msgid "The tags %s of the configuration cannot be used here: \"direct\" means straight to the internet and \"core\" means that the rules of the subscription decide."
 msgstr "Теги %s из конфигурации здесь использовать нельзя: «direct» означает «сразу в интернет», а «core» — «решают правила подписки»."
 
-msgid "Site recognition is not enabled in the configuration, so lines with a site that goes direct are not used."
-msgstr "В конфигурации не включено распознавание сайтов, поэтому строки с сайтом, который идёт напрямую, не используются."
+msgid "Site recognition is not enabled in the configuration, so unqualified direct site rules are not used. Qualified site rules also need recognized traffic."
+msgstr "В конфигурации не включено распознавание сайтов, поэтому правила сайтов с direct без портов и протокола не используются. Правила сайтов с портами или протоколом также требуют распознавания трафика."
 
 msgid "One rule per line, for example:"
 msgstr "Одно правило в строке, например:"
@@ -1668,3 +1668,22 @@ msgstr "Порт 53 занят."
 
 msgid "Disable the other DNS service."
 msgstr "Отключите другую службу DNS."
+
+msgid "Line %s of My rules (%s): a site with ports or protocol cannot use core. Use direct or a named target."
+msgstr "Строка %s Моих правил (%s): для сайта с портами или протоколом нельзя использовать core. Выберите direct или именованное направление."
+
+msgid "A site rule with ports or protocol does not capture traffic on its own. Use an address or subnet for exact capture."
+msgstr "Правило сайта с портами или протоколом само по себе не перехватывает трафик. Для точного перехвата используйте адрес или подсеть."
+
+msgid "Append ;ports or ;ports;tcp/udp to a site, address or list link; use ;;udp for all UDP ports. Site selectors cannot use core. Semicolons in regexp: remain part of the expression, not selectors."
+msgstr "Добавьте ;ports или ;ports;tcp/udp к сайту, адресу или ссылке на список; ;;udp означает все порты UDP. Для сайтов с такими условиями нельзя использовать core. Точки с запятой в regexp: остаются частью выражения, а не условиями."
+
+
+msgid "A site core rule does not stop later routes with overlapping different site matchers. Avoid that overlap when the subscription should decide."
+msgstr "Правило сайта с core не останавливает последующие маршруты с другими пересекающимися условиями сайта. Избегайте такого пересечения, если выбор должен делать конфиг подписки."
+
+msgid "Qualified named address selectors incompatible with sniffing were skipped. Specify a safe protocol or use direct or core."
+msgstr "Адресные правила с именованной целью и уточнениями, несовместимые с распознаванием трафика, пропущены. Укажите безопасный протокол или используйте direct либо core."
+
+msgid "Rules for %s stay saved but some are not applied because Xray may replace their destination IP with a site name."
+msgstr "Правила для %s остаются сохранёнными, но некоторые не применяются, потому что Xray может заменить IP-адрес назначения именем сайта."

@@ -142,21 +142,23 @@ return view.extend({
 	// My rules: one ordered list of sites and addresses, each with a target.
 	rulesOption: function(s, proxyFirst) {
 		const o = this.listOption(s, 'rules', this.titles.rules,
-			_('One rule per line: a site, an IP address or subnet, or a link to a list of addresses, then a space and where it goes. The first line that matches wins. Write a site as its name, not its IP address.'));
+			_('One rule per line: a site, an IP address or subnet, or a link to a list of addresses, then a space and where it goes. The first emitted Xray site route that matches wins. Write a site as its name, not its IP address.'));
 		const targets = this.profile.targets || [];
 		const reserved = this.profile.reserved || [];
 		const recognizesSites = /(?:^|,)(?:http|tls|quic)(?:,|$)/.test(this.profile.sniff || '');
 		this.extendWidget(o, (node) => {
 			const tags = E('p', text(targets.join(', ')));
 			const where = [
+				...(this.profile.sniff_skipped_targets || []).map(target => E('p', { class: 'alert-message warning' }, text(_('Rules for %s stay saved but some are not applied because Xray may replace their destination IP with a site name.').format(target)))),
 				E('p', [ E('code', text('direct')), ' — ', _('straight to the internet'), '; ',
 					E('code', text('core')), ' — ', _('the rules of your subscription decide'),
 					targets.length ? '; ' + _('or one of your servers and balancers:') : '.' ].flat()),
 				...(targets.length && targets.length <= TARGETS_SHOWN ? [ tags ] : []),
 				...(targets.length > TARGETS_SHOWN ? [ api.toggle(_('Show the targets'), _('Hide the targets'), tags) ] : []),
 				...(reserved.length ? [ E('p', text(_('The tags %s of the configuration cannot be used here: "direct" means straight to the internet and "core" means that the rules of the subscription decide.').format(reserved.join(', ')))) ] : []),
+				...(!proxyFirst ? [ E('p', text(_('A site rule with ports or protocol does not capture traffic on its own. Use an address or subnet for exact capture.'))) ] : []),
 				// Direct sites are recognized by the core in this mode only with sniffing.
-				...(proxyFirst && !recognizesSites ? [ E('p', text(_('Site recognition is not enabled in the configuration, so lines with a site that goes direct are not used.'))) ] : [])
+				...(proxyFirst && !recognizesSites ? [ E('p', text(_('Site recognition is not enabled in the configuration, so unqualified direct site rules are not used. Qualified site rules also need recognized traffic.'))) ] : [])
 			];
 			const format = E('div', { class: 'cbi-value-description' }, [
 				E('p', text(_('One rule per line, for example:'))),
@@ -167,6 +169,8 @@ return view.extend({
 					[ '1.2.3.0/24 direct', _('an address or subnet') ],
 					[ 'https://example.com/list.txt direct', _('a link to a list of addresses and subnets') ]
 				].map(([ example, meaning ]) => E('li', [ E('code', text(example)), ' — ', meaning ]))),
+				E('p', text(_('A site core rule does not stop later routes with overlapping different site matchers. Avoid that overlap when the subscription should decide.'))),
+				E('p', text(_('Append ;ports or ;ports;tcp/udp to a site, address or list link; use ;;udp for all UDP ports. Site selectors cannot use core. Semicolons in regexp: remain part of the expression, not selectors.'))),
 				E('p', text(_('Other site forms: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Comments start with #. Saving is refused until every line is valid.')))
 			]);
 			const sources = this.profile.provider_sources;

@@ -39,29 +39,33 @@ nft_has_plain_entries() {
 # $5 action.
 nft_port_rules() {
 	local chain="$1" file="$2" fam="$3" field="$4" action="$5"
-	local ports="" match=""
+	local ports="" proto="" match="" transport="" port_match=""
 
 	[ -s "$file" ] || return 0
 	{ grep ';' "$file" || true; } | awk -F ';' -v fam="$fam" -v field="$field" '
 		{
-			ports = $2
-			if (!(ports in seen)) { seen[ports] = 1; order[++specs] = ports }
-			if ($1 == "") { wildcard[ports] = 1; next }
-			chunk = int(count[ports]++ / 512) + 1
-			key = ports SUBSEP chunk
+			spec = $2 ";" $3
+			if (!(spec in seen)) { seen[spec] = 1; order[++specs] = spec }
+			if ($1 == "") { wildcard[spec] = 1; next }
+			chunk = int(count[spec]++ / 512) + 1
+			key = spec SUBSEP chunk
 			addresses[key] = addresses[key] (addresses[key] == "" ? "" : ", ") $1
 		}
 		END {
 			for (i = 1; i <= specs; i++) {
-				ports = order[i]
-				for (chunk = 1; chunk <= int((count[ports] + 511) / 512); chunk++)
-					print ports ";" fam " " field " { " addresses[ports SUBSEP chunk] " }"
-				if (wildcard[ports])
-					print ports ";meta nfproto " (fam == "ip" ? "ipv4" : "ipv6")
+				spec = order[i]
+				for (chunk = 1; chunk <= int((count[spec] + 511) / 512); chunk++)
+					print spec ";" fam " " field " { " addresses[spec SUBSEP chunk] " }"
+				if (wildcard[spec])
+					print spec ";meta nfproto " (fam == "ip" ? "ipv4" : "ipv6")
 			}
 		}
-	' | while IFS=';' read -r ports match; do
-		nft_rule "$chain" "$match meta l4proto { tcp, udp } th dport { $ports } $action"
+	' | while IFS=';' read -r ports proto match; do
+		transport="$proto"
+		[ -n "$transport" ] || transport='{ tcp, udp }'
+		port_match=""
+		[ -z "$ports" ] || port_match=" th dport { $ports }"
+		nft_rule "$chain" "$match meta l4proto $transport$port_match $action"
 	done
 }
 
@@ -217,6 +221,44 @@ nft_render_direct_returns() {
 	nft_port_rules "$chain" "$f6" ip6 daddr return
 }
 
+# Adjacent tuples with the same verdict and transport share one bounded rule.
+# A direct accept exits this hook; a proxy return resumes the existing device,
+# fallback marking, and QUIC handling. In proxy-first the device may still bypass.
+nft_render_personal_addresses() {
+	local file="$1" proxy="return" action="" fam="" field="" ports="" proto=""
+
+	[ -s "$file" ] || return 0
+	[ "$POLICY_MODE" != direct-first ] || proxy="$NFT_MARK_SET return"
+	nft_line "add chain inet $NFT_TABLE_NAME personal_addresses"
+	awk -F ';' '
+		function flush() {
+			if (count) print last ";" (addresses == "" ? "" : "{ " addresses " }")
+			count = 0; addresses = ""
+		}
+		/^#/ { next }
+		{
+			key = $1 ";" $2 ";" $4 ";" $5 ";" ($3 == "")
+			if (key != last || count == 512) flush()
+			last = key; count++
+			if ($3 != "") addresses = addresses (addresses == "" ? "" : ", ") $3
+		}
+		END { flush() }
+	' "$file" | while IFS=';' read -r action fam ports proto _ field; do
+		if [ "$action" = direct ]; then
+			action=accept
+		else
+			action="$proxy"
+		fi
+		[ -z "$field" ] || field="$fam daddr $field "
+		if [ "$action" != accept ] || [ -n "$ports$proto" ]; then
+			[ -n "$proto" ] || proto='{ tcp, udp }'
+			field="${field}meta l4proto $proto "
+		fi
+		[ -z "$ports" ] || field="${field}th dport { $ports } "
+		nft_rule personal_addresses "$field$action"
+	done
+}
+
 # In fake-IP mode selected devices leave the caller via goto: a real-IP
 # return must exit prerouting_policy, not resume at its catch-all mark.
 # Direct devices: proxy-first returns them (redir-host) or splits them
@@ -266,7 +308,7 @@ nft_render_catch_all() {
 
 # Render the full ruleset. Lists are resolved into $2 (a work directory).
 nft_render() {
-	local file="$1" dir="$2" kind="" kinds=""
+	local file="$1" dir="$2" kind="" kinds="" only="" personal="$2/personal-addresses"
 
 	NFT_FILE="$file"
 	NFT_MARK_SET="meta mark set meta mark | $NFT_INTERCEPT_MARK"
@@ -278,12 +320,20 @@ nft_render() {
 	else
 		kinds="dst src direct"
 	fi
+	if [ -s "$RULES_FILE" ]; then
+		lists_rules_remote_json >"$dir/personal-caches.json" || return 1
+		lists_rule_targets | xraywrt-json rules packet-addresses "$RULES_FILE" "$dir/personal-caches.json" "$RUNTIME_CONFIG" >"$personal" || return 1
+	else
+		: >"$personal" || return 1
+	fi
+	[ ! -s "$personal" ] || only=provider
 	for kind in $kinds; do
-		lists_resolve "$kind" "$dir/$kind.4" "$dir/$kind.6" "$dir/$kind.mac" || return 1
+		lists_resolve "$kind" "$dir/$kind.4" "$dir/$kind.6" "$dir/$kind.mac" "$only" || return 1
 	done
 
 	nft_render_base
 	nft_render_client_ipv6
+	nft_render_personal_addresses "$personal"
 	nft_fill_set proxy_dst "$dir/dst.4"
 	nft_fill_set proxy_dst6 "$dir/dst.6"
 	nft_fill_set proxy_src "$dir/src.4"
@@ -313,11 +363,13 @@ nft_render() {
 	[ "$DNS_HIJACK" = "1" ] && nft_rule prerouting_policy "meta l4proto { tcp, udp } th dport 53 return"
 	if [ "$POLICY_MODE" = "proxy-first" ]; then
 		nft_render_direct_returns prerouting_policy "$dir/direct.4" "$dir/direct.6"
+		[ ! -s "$personal" ] || nft_rule prerouting_policy "jump personal_addresses"
 		nft_render_direct_devices prerouting_policy "$dir/direct_src.4" "$dir/direct_src.6" "$dir/direct_src.mac"
 		nft_render_catch_all prerouting_policy
 	else
 		# Own addresses that go direct win over the provider's list below.
 		nft_render_direct_returns prerouting_policy "$dir/direct.4" "$dir/direct.6"
+		[ ! -s "$personal" ] || nft_rule prerouting_policy "jump personal_addresses"
 		nft_render_list_marks prerouting_policy "$dir/dst.4" "$dir/dst.6" daddr proxy_dst
 		nft_render_list_marks prerouting_policy "$dir/src.4" "$dir/src.6" saddr proxy_src
 		# Ethernet source headers are available on received L2 frames here,
@@ -357,9 +409,11 @@ nft_render() {
 		# The router's own DHCP/DHCPv6 client talks to the LAN, never to the proxy.
 		nft_rule mangle_output "udp dport { 67, 547 } return"
 		nft_render_direct_returns mangle_output "$dir/direct.4" "$dir/direct.6"
+		[ ! -s "$personal" ] || nft_rule mangle_output "jump personal_addresses"
 		nft_render_catch_all mangle_output
 	else
 		nft_render_direct_returns mangle_output "$dir/direct.4" "$dir/direct.6"
+		[ ! -s "$personal" ] || nft_rule mangle_output "jump personal_addresses"
 		nft_render_list_marks mangle_output "$dir/dst.4" "$dir/dst.6" daddr proxy_dst
 		nft_render_fakeip mangle_output
 	fi
@@ -378,7 +432,7 @@ nft_input_hash() {
 	local file="" files=""
 
 	set --
-	for file in "$PROFILE_FILE" "$RULES_FILE" "$SRC_LIST_FILE" \
+	for file in "$RUNTIME_CONFIG" "$PROFILE_FILE" "$RULES_FILE" "$SRC_LIST_FILE" \
 		"$DIRECT_SRC_LIST_FILE" "$POLICY_CACHE_DIR"/*.txt; do
 		[ ! -f "$file" ] || set -- "$@" "$file"
 	done

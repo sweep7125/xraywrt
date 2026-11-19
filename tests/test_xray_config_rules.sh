@@ -25,8 +25,57 @@ dns_servers() { jq -c .dns.servers <<<"$out"; }
 core_test() {
 	xray-test run -test -c "$tmpdir/out.json" >"$tmpdir/core.log" 2>&1 || fail "$1: core test: $(cat "$tmpdir/core.log")"
 }
+# Send both transports to the same original address and port on the real core.
+selector_routes() (
+	local core="" port=18948
+	trap '[ -z "$core" ] || { kill "$core" 2>/dev/null || :; wait "$core" 2>/dev/null || :; }' EXIT
+	jq --arg log "$tmpdir/access.log" --argjson port "$port" '
+	 .routing.rules += [{ip:["198.20.22.2"],port:443,network:"tcp,udp",outboundTag:"second"}]
+	 | (.outbounds[] | select(.protocol == "socks") | .settings.servers) = [{address:"127.0.0.1",port:1}]
+	 | .inbounds = [{tag:"xraywrt-tproxy4",listen:"127.0.0.1",port:$port,protocol:"tunnel",settings:{address:"198.20.22.2",port:443,allowedNetwork:"tcp,udp"}}]
+	 | .log = {access:$log,loglevel:"warning"}' <<<"$out" >"$tmpdir/selector-runtime.json"
+	: >"$tmpdir/access.log"
+	"$XRAY_TEST_BIN" run -c "$tmpdir/selector-runtime.json" >"$tmpdir/selector-core.log" 2>&1 &
+	core=$!
+	for _ in {1..100}; do
+		grep -q 'started' "$tmpdir/selector-core.log" && break
+		kill -0 "$core" 2>/dev/null || fail "selector core start: $(cat "$tmpdir/selector-core.log")"
+		sleep .05
+	done
+	printf 'tcp\n' >/dev/tcp/127.0.0.1/$port
+	printf 'udp\n' >/dev/udp/127.0.0.1/$port
+	for _ in {1..100}; do
+		if grep -Fq 'accepted tcp:198.20.22.2:443 [xraywrt-tproxy4 -> second]' "$tmpdir/access.log" &&
+		   grep -Fq 'accepted udp:198.20.22.2:443 [xraywrt-tproxy4 -> proxy]' "$tmpdir/access.log"; then
+			return 0
+		fi
+		sleep .05
+	done
+	fail "$1: expected provider TCP route and personal UDP route: $(cat "$tmpdir/access.log")"
+)
+
 sniffing='"inbounds":[{"tag":"in","protocol":"socks","listen":"127.0.0.1","port":1081,"sniffing":{"enabled":true,"destOverride":["tls"]}}]'
 src_json "{\"outbounds\":[$direct_ob,$proxy_ob,$second_ob],\"routing\":{\"balancers\":[{\"tag\":\"pool\",\"selector\":[\"proxy\",\"second\"]}]},$sniffing}"
+
+# Qualified sites route only recognized traffic and never change DNS selection.
+for mode in direct-first proxy-first; do
+ gen_rules "$mode" $'overlap.example;443;udp direct\noverlap.example;443;tcp proxy\nother.example;;udp pool'
+ jq -e '[.routing.rules[] | select((.ruleTag // "") | startswith("xraywrt-rule-")) | {domain,port,network,outboundTag,balancerTag}] == [
+  {domain:["domain:overlap.example"],port:"443",network:"udp",outboundTag:"xraywrt-direct",balancerTag:null},
+  {domain:["domain:overlap.example"],port:"443",network:"tcp",outboundTag:"proxy",balancerTag:null},
+  {domain:["domain:other.example"],port:null,network:"udp",outboundTag:null,balancerTag:"pool"}]' <<<"$out" >/dev/null || fail "$mode: qualified site tuples: $(own_rules)"
+ assert_eq '["192.0.2.53"]' "$(dns_servers)" "$mode: qualified sites do not add DNS entries"
+ core_test "$mode qualified sites"
+done
+gen_rules direct-first $'example.com;443;udp proxy\nexample.com direct'
+jq -e '[.[] | {domain,port,network,outboundTag}] == [{domain:["domain:example.com"],port:"443",network:"udp",outboundTag:"proxy"},{domain:["domain:example.com"],port:null,network:null,outboundTag:"xraywrt-direct"}]' <<<"$(own_rules)" >/dev/null || fail 'qualified route precedes unqualified route'
+gen_rules direct-first $'example.com direct\nexample.com;443;udp proxy'
+jq -e '[.[] | .outboundTag] == ["xraywrt-direct","proxy"]' <<<"$(own_rules)" >/dev/null || fail 'unqualified route precedes qualified route'
+gen_rules direct-first $'domain:example.com core\ndomain:example.com;443;udp proxy\nfull:api.example.com;443;udp proxy'
+jq -e '[.[] | .domain] == [["full:api.example.com"]]' <<<"$(own_rules)" >/dev/null || fail 'legacy core shadows its same matcher but not overlapping different matchers'
+gen_rules direct-first 'regexp:^foo;bar$ proxy'
+assert_eq '[{"domain":["regexp:^foo;bar$"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-1"}]' "$(own_rules)" 'regexp semicolon remains literal legacy syntax'
+pass 'My rules: qualified sites use native tuple routing without DNS changes'
 
 # Interleaved blocks: a change of target starts a new rule and a new DNS entry, in line order.
 for mode in direct-first proxy-first; do
@@ -45,6 +94,11 @@ pass 'My rules: runs of sites'
 resolver='{"address":"https://dns.example/dns-query","port":443,"tag":"dns-direct","expectedIPs":["192.0.2.0/24"],"unexpectedIPs":["192.0.2.66"],"queryStrategy":"UseIPv4"}'
 fake='{"address":"fakedns","domains":["domain:overlap.example"],"skipFallback":true,"queryStrategy":"UseIPv4"}'
 src_json "{\"outbounds\":[$direct_ob,$proxy_ob],\"dns\":{\"servers\":[$fake,$resolver]},\"routing\":{\"rules\":[{\"inboundTag\":[\"dns-direct\"],\"outboundTag\":\"direct\"},{\"network\":\"tcp,udp\",\"outboundTag\":\"proxy\"}]},$sniffing}"
+for mode in direct-first proxy-first; do
+ gen_rules "$mode" $'overlap.example;443;udp direct\noverlap.example;443;tcp proxy'
+ jq -e --argjson resolver "$resolver" --argjson fake "$fake" '.dns.servers == [$fake, $resolver]' <<<"$out" >/dev/null || fail "$mode: qualified overlap preserves provider DNS"
+ core_test "$mode qualified FakeDNS overlap"
+done
 gen_rules direct-first 'overlap.example direct'
 jq -e --argjson resolver "$resolver" --argjson fake "$fake" '
  .dns.servers == [($resolver + {domains:["domain:overlap.example"],skipFallback:true,finalQuery:true}), $fake, $resolver]
@@ -68,6 +122,8 @@ jq -e --argjson resolver "$resolver" --argjson fake "$fake" '.dns.servers == [$f
 pass 'My rules: shared DNS tag follows rewritten route'
 
 # Restore the common source for the remaining tests.
+# Selector mechanics use non-overriding sniffing; overriding behavior has separate tests.
+sniffing='"inbounds":[{"tag":"in","protocol":"socks","listen":"127.0.0.1","port":1081,"sniffing":{"enabled":true,"destOverride":["tls"],"routeOnly":true}}]'
 src_json "{\"outbounds\":[$direct_ob,$proxy_ob,$second_ob],\"routing\":{\"balancers\":[{\"tag\":\"pool\",\"selector\":[\"proxy\",\"second\"]}]},$sniffing}"
 
 # The target decides the rule; core makes none; the first line of a name wins.
@@ -78,7 +134,39 @@ prof_has 'fake-domains 3'
 prof_lacks 'direct-domains 1'
 pass 'My rules: core target'
 
-# Addresses: a tag gets an ip rule (also from a list link), direct and core none.
+# Qualified addresses and cached rows form the same tuples as packet policy.
+cat >"$tmpdir/selectors.txt" <<'EOF'
+198.20.22.2;;udp
+2001:db8::2;8443;udp
+198.20.22.3;;tcp
+EOF
+printf '%s\n' '198.20.22.2;443;tcp core' 'https://list.test/selectors;0443;udp proxy' '198.20.22.2;443 second' '2001:DB8::1/064;080-090;tcp pool' '198.20.22.2;8443;;udp second' >"$tmpdir/rules.txt"
+assert_eq 'https://list.test/selectors' "$(xraywrt-json rules urls "$tmpdir/rules.txt")" 'cache keyed by bare URL'
+assert_eq $'198.20.22.2;443;tcp\nhttps://list.test/selectors;443;udp\n198.20.22.2;443\n2001:db8::1/64;80-90;tcp' "$(printf 'proxy\nsecond\npool\n' | xraywrt-json rules entries "$tmpdir/rules.txt" proxy)" 'canonical selectors and invalid entries excluded'
+for mode in direct-first proxy-first; do
+ gen "$tmpdir/src.json" ".mode_override = true | .mode = \"$mode\" | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {\"https://list.test/selectors\": \"$tmpdir/selectors.txt\"}"
+ assert_eq 0 "$rc" "$mode: $errtxt"
+ jq -e 'all(.[]; .inboundTag == ["xraywrt-tproxy4","xraywrt-tproxy6"]) and [.[] | del(.ruleTag,.inboundTag)] == [
+  {ip:["198.20.22.2"],port:"443",network:"udp",outboundTag:"proxy"},
+  {ip:["2001:db8::2"],port:"8443",network:"udp",outboundTag:"proxy"},
+  {ip:["198.20.22.2"],port:"443",network:"udp",outboundTag:"second"},
+  {ip:["2001:db8::1/64"],port:"80-90",network:"tcp",balancerTag:"pool"}
+ ]' <<<"$(own_rules)" >/dev/null || fail "$mode: qualified URL inheritance and core shadows: $(own_rules)"
+ core_test "$mode selectors"
+ selector_routes "$mode"
+done
+pass 'My rules: canonical address tuples and ordered core shadows'
+for mode in direct-first proxy-first; do
+ gen_rules "$mode" $'2001:db8::1;81;tcp core\n2001:db8::/127;80-82;tcp proxy\n198.51.100.1 direct\n198.51.100.1;;udp second\n198.51.100.2 core\n198.51.100.2;;udp second'
+ assert_eq '[{"ip":["2001:db8::"],"port":"80-82","network":"tcp","inboundTag":["xraywrt-tproxy4","xraywrt-tproxy6"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-2"},{"ip":["2001:db8::1"],"port":"80,82","network":"tcp","inboundTag":["xraywrt-tproxy4","xraywrt-tproxy6"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-2-2"}]' "$(own_rules)" "$mode: only intersecting IPv6 ports and plain IPv4 shadows are removed"
+ core_test "$mode CIDR and port shadows"
+ gen_rules "$mode" $'198.51.100.2;443;udp core\n198.51.100.2 second'
+ jq -e '[.[] | select(.inboundTag == ["xraywrt-tproxy4","xraywrt-tproxy6"]) | {port,network}] == [{port:null,network:"tcp"},{port:"0-442,444-65535",network:"udp"}] and any(.[]; .ip == ["198.51.100.2"] and (.inboundTag | index("xraywrt-dns-internal")))' <<<"$(own_rules)" >/dev/null || fail "$mode: TCP and all other UDP ports remain eligible"
+ core_test "$mode all-port shadow"
+done
+
+
+# A tag gets IP rules for plain and scoped rows; direct and core need no outbound.
 cat >"$tmpdir/cache.txt" <<'EOF'
 9.9.9.0/24
 2001:db8:9::/48
@@ -92,7 +180,7 @@ printf '%s\n' $'1.2.3.0/24 proxy\n2001:DB8::/32 proxy\nhttps://list.test/a.txt p
 for mode in direct-first proxy-first; do
 	gen "$tmpdir/src.json" ".mode_override = true | .mode = \"$mode\" | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {\"https://list.test/a.txt\": \"$tmpdir/cache.txt\", \"https://list.test/b.txt\": \"$tmpdir/missing.txt\"}"
 	assert_eq 0 "$rc" "$mode: $errtxt"
-	assert_eq '[{"ip":["1.2.3.0/24","2001:db8::/32","9.9.9.0/24","2001:db8:9::/48"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-1"},{"ip":["0.0.0.0/24"],"balancerTag":"pool","ruleTag":"xraywrt-rule-4"}]' "$(own_rules)" "$mode: address rules: typed and fetched entries of a tag run, none for direct and core"
+	assert_eq '[{"ip":["1.2.3.0/24","2001:db8::/32","9.9.9.0/24","2001:db8:9::/48"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-1"},{"ip":["8.8.8.8"],"port":"443","inboundTag":["xraywrt-tproxy4","xraywrt-tproxy6"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-1-2"},{"ip":["0.0.0.0/0","::/0"],"port":"53","inboundTag":["xraywrt-tproxy4","xraywrt-tproxy6"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-1-3"},{"ip":["0.0.0.0/24"],"balancerTag":"pool","ruleTag":"xraywrt-rule-4"}]' "$(own_rules)" "$mode: address rules: typed and fetched entries of a tag run, none for direct and core"
 	core_test "$mode addresses"
 done
 # Too many addresses for one rule skip that rule with a warning: the config stays valid

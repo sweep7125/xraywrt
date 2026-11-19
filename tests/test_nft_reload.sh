@@ -33,7 +33,7 @@ mkdir -p "$XRAY_SHARE_DIR"
 mkdir -p "$PKG_TMP_DIR" "$PKG_STATE_DIR" "$POLICY_CACHE_DIR"
 lists_ensure_files
 printf 'profile-schema 1\nfake-enabled 0\nmode direct-first\ndns redir-host\nhas proxy-ips\nproxy-ip 1.1.1.1;443\n' >"$PROFILE_FILE"
-printf 'runtime\n' >"$RUNTIME_CONFIG"
+printf '{}\n' >"$RUNTIME_CONFIG"
 geodata_snapshot
 settings_load
 service_ready() { return 0; }

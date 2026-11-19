@@ -1,16 +1,15 @@
 #!/bin/ash
 
 # Policy lists: one entry per line, IPv4, IPv6 or MAC (device lists only).
-#   addr[/prefix][;ports]   e.g. 1.1.1.1, 2001:db8::/32;443
+#   addr[/prefix][;ports[;tcp|udp]]  e.g. 1.1.1.1, 2001:db8::/32;443;udp
 #   ;ports                  any address on these ports
-#   URL[;ports]             remote list (cached)
+#   URL[;ports[;tcp|udp]]   remote list (cached)
 # Remote URLs are fetched by lists_update_remote and read from the cache, so
 # applying policy never waits on the network. The provider may ship dst and
 # direct lists (xraywrt proxy-ips/direct-ips); they are always used as they
 # are. The user's own sites and addresses are one ordered list, My rules
 # ($RULES_FILE): `<what> <target>` per line, read by xraywrt-json rules. Its
-# addresses join the provider lists here: direct ones bypass, the rest go to
-# the core. Device lists are plain files.
+# addresses bypass or go to the core. Device lists are plain files.
 
 LISTS_REMOTE_MAX_BYTES="${LISTS_REMOTE_MAX_BYTES:-1048576}"
 LISTS_OWN_MAX_BYTES=1048576
@@ -170,19 +169,19 @@ lists_rules_remote_hashes() {
 	done
 }
 
-# Cleaned entries that apply for one kind. Provider lists are always used; the
-# direct one only in proxy-first, where it is the whole policy.
+# Cleaned entries for one kind. Only proxy-first uses the provider direct list.
+# The ordered personal policy resolves its own destinations separately.
 lists_source() {
-	local kind="$1" file=""
+	local kind="$1" only="${2:-}" file=""
 
 	case "$kind" in
 	dst)
 		lists_provider_entries dst
-		lists_rules_entries proxy
+		[ "$only" = provider ] || lists_rules_entries proxy
 		;;
 	direct)
 		[ "${POLICY_MODE:-}" != proxy-first ] || lists_provider_entries direct
-		lists_rules_entries direct
+		[ "$only" = provider ] || lists_rules_entries direct
 		;;
 	src | direct_src)
 		file="$(lists_file "$kind")"
@@ -253,11 +252,10 @@ lists_classify() {
 		}
 		$0 == "https://" { remote = 1; next }
 		{
-			addr = $0; ports = ""
-			if (index($0, ";")) { addr = substr($0, 1, index($0, ";") - 1); ports = substr($0, index($0, ";") + 1) }
+			n = split($0, parts, ";"); addr = parts[1]; ports = parts[2]; proto = parts[3]
 			fam = ""
-			if (index($0, ";") && !ports_ok(ports)) fam = ""
-			else if (addr == "") fam = (ports != "") ? "any" : ""
+			if (n > 3 || (n == 3 && (kind == "src" || kind == "direct_src")) || (n == 2 && !ports_ok(ports)) || (n == 3 && ((ports != "" && !ports_ok(ports)) || (proto != "tcp" && proto != "udp")))) fam = ""
+			else if (addr == "") fam = (ports != "" || proto != "") ? "any" : ""
 			else if (v4(addr)) fam = "4"
 			else if (v6(addr)) fam = "6"
 			else if (!index($0, ";") && mac(addr) && kind != "dst" && kind != "direct") { fam = "mac"; $0 = tolower($0) }
@@ -270,7 +268,7 @@ lists_classify() {
 			if (fam != "mac") {
 				if (fam == "4") addr = nv4(addr)
 				else if (fam == "6") addr = nprefix(addr)
-				$0 = addr (index($0, ";") ? ";" nports(ports) : "")
+				$0 = addr (n >= 2 ? ";" (ports != "" ? nports(ports) : "") : "") (n == 3 ? ";" proto : "")
 			}
 			if (o4 == "") { print fam " " $0; next }
 			if (fam == "4" || fam == "any") print >o4
@@ -337,12 +335,13 @@ lists_json() {
 }
 
 # Optional fourth argument receives device MACs, separately from IP families.
+# Pass "provider" as the fifth argument to omit personal destinations.
 lists_resolve() {
-	local kind="$1" out4="$2" out6="$3" outmac="${4:-}" src="" line="" url="" ports="" cache="" bad="" bad_count=0
+	local kind="$1" out4="$2" out6="$3" outmac="${4:-}" only="${5:-}" src="" line="" url="" ports="" cache="" bad="" bad_count=0
 
 	src="$PKG_TMP_DIR/list.$kind.$$"
 	ensure_dir "$PKG_TMP_DIR" || return 1
-	lists_source "$kind" >"$src" || return 1
+	lists_source "$kind" "$only" >"$src" || return 1
 	if ! { : >"$out4" && : >"$out6" && { [ -z "$outmac" ] || : >"$outmac"; }; }; then
 		rm -f "$src"
 		return 1
@@ -356,9 +355,22 @@ lists_resolve() {
 			url="${line%%;*}"
 			ports=""
 			[ "$url" = "$line" ] || ports="${line#*;}"
+			if [ "$url" != "$line" ] && [ -z "$(printf '1.1.1.1;%s\n' "$ports" | lists_classify 0 "$kind")" ]; then
+				continue
+			fi
 			cache="$(lists_cache_file "$url")"
 			[ -r "$cache" ] || continue
-			awk -v p="$ports" 'p != "" && !index($0, ";") { $0 = $0 ";" p } { print }' "$cache"
+			awk -v p="$ports" '
+				BEGIN { split(p, inherited, ";") }
+				{
+					n = split($0, entry, ";")
+					if (inherited[2] != "" && n == 3 && entry[3] != inherited[2]) next
+					if (n == 1 && p != "") $0 = $0 ";" p
+					else if (n == 2 && inherited[2] != "" && entry[2] != "") $0 = $0 ";" inherited[2]
+					else if (n == 3 && entry[2] == "" && inherited[1] != "") $0 = entry[1] ";" inherited[1] ";" entry[3]
+					print
+				}
+			' "$cache"
 		done
 	} | lists_classify 0 "$kind" "$out4" "$out6" "$outmac" "$src.bad" || {
 		rm -f "$src" "$src.bad"
@@ -501,6 +513,7 @@ lists_rules_error() {
 	text="$(printf '%s' "$text" | cut -c1-90)"
 	case "$code" in
 	limit) err_code rules_too_many "My rules has more than %s sites." "$RULES_SITES_LIMIT" ;;
+	qualified_domain_core) err_code rules_qualified_domain_core "Line %s of My rules (%s): a site with ports or protocol cannot use core. Use direct or a named target." "$line" "$text" ;;
 	no_target) err_code rules_no_target "Line %s of My rules (%s) has no target. Add a space and one of: %s." "$line" "$text" "$tags" ;;
 	unknown_target) err_code rules_unknown_target "Line %s of My rules (%s): there is no target \"%s\". Use one of: %s." "$line" "$text" "$target" "$tags" ;;
 	*) err_code rules_bad_entry "Line %s of My rules (%s) is not a site, an IP address, a subnet or a list link followed by a target." "$line" "$text" ;;
@@ -614,7 +627,7 @@ lists_policy_apply() {
 # apply-lists: install under the lock, fetch new remote URLs without it,
 # then rebuild nft (and the config, when My rules changed) under the lock.
 lists_apply() {
-	local changed="" rc=0 tmp="" warning="" rules="${1:--}"
+	local changed="" remote="" rc=0 tmp="" warning="" rules="${1:--}"
 
 	# My rules change the generated config, not only nft.
 	if [ "$rules" != - ] && [ -f "$rules" ] && cmp -s "$rules" "$RULES_FILE"; then
@@ -627,11 +640,15 @@ lists_apply() {
 	[ "$rc" -eq 0 ] || return 1
 	if service_ready || { service_running && [ -f "$DEGRADED_FILE" ]; }; then
 		if settings_load; then
-			lists_update_remote 0 >/dev/null || warning="$(code_message apply_lists 'Lists were saved, but some remote lists could not be fetched. Retry Update remote lists.')"
+			remote="$(lists_update_remote 0)" || warning="$(code_message apply_lists 'Lists were saved, but some remote lists could not be fetched. Retry Update remote lists.')"
 			if [ "$rules" != - ]; then
 				with_lock service_reload || rc=1
 			elif service_ready; then
-				with_lock nft_apply_if_ready || rc=1
+				if [ "$remote" = changed ]; then
+					with_lock lists_policy_apply || rc=1
+				else
+					with_lock nft_apply_if_ready || rc=1
+				fi
 			fi
 		else
 			rc=1

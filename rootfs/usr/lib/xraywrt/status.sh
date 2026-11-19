@@ -241,6 +241,7 @@ profile_json() {
 		--arg overrides "$PROVIDER_OVERRIDES" \
 		--argjson dns_outbounds "$(xraywrt-json dns-outbounds "$XRAY_CONFIG" "$PROFILE_NAME" 2>/dev/null || echo null)" \
 		--arg dns_raw_lost "${DNS_RAW_LOST:-}" --arg dns_raw_via "${DNS_RAW_VIA:-}" \
+		--arg sniff_skipped_targets "$(profile_entries rules-sniff-skipped-target)" \
 		--arg targets "$(lists_rule_targets)" --arg reserved "$(profile_entries rules-reserved)" \
 		--arg provider_lists "$({ lists_provided dst || lists_provided direct; } && echo 1)" \
 		--arg preview_unavailable "$preview_unavailable" --arg vpn_preview "$vpn_preview" --arg direct_preview "$direct_preview"

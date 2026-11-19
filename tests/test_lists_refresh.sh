@@ -58,6 +58,23 @@ for mode in mixed all-fail unchanged; do
  pass "lists_refresh $mode"
 done
 
+# A changed core list can shadow a later tag even when that tag has no URL.
+test_shadow_refresh() {
+ local mode=unchanged PROFILE_FILE="$tmpdir/shadow.profile" RULES_FILE="$tmpdir/shadow.rules" POLICY_CACHE_DIR="$tmpdir/shadow-cache"
+ mkdir -p "$POLICY_CACHE_DIR"
+ printf 'rules-target proxy\n' >"$PROFILE_FILE"
+ printf 'https://ok.example/list;443;udp core\n9.9.9.9 proxy\n' >"$RULES_FILE"
+ printf '1.1.1.1\n' >"$(lists_cache_file https://ok.example/list)"
+ (
+  service_reload() { printf 'reload\n' >>"$tmpdir/applied"; }
+  : >"$tmpdir/applied"
+  lists_refresh >"$tmpdir/out" 2>"$tmpdir/err"
+  assert_eq reload "$(cat "$tmpdir/applied")" 'refresh rebuilds a tag shadowed by a changed core URL'
+ )
+}
+test_shadow_refresh
+pass 'changed address shadow cache rebuilds the core routing config'
+
 # The prescribed successful retry clears only its own warning, even if unchanged.
 mode=unchanged
 printf 'Fetch failed [E:apply_lists]\n' >"$APPLY_WARNING_FILE"

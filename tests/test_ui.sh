@@ -656,7 +656,7 @@ seq(async () => {
  entryButton.click();
  h.assertEq(entryHelp.hidden, false, 'Entry format opens syntax');
  h.assertEq(entryButton.attrs['aria-expanded'], 'true', 'open state accessible');
- h.assert(texts(listWidget).some(t => t.startsWith('Site recognition is not enabled')), 'proxy-first without sniffing: direct sites are not used');
+ h.assert(texts(listWidget).some(t => t.startsWith('Site recognition is not enabled') && t.includes('unqualified direct site rules')), 'proxy-first without sniffing: only unqualified direct site rules are skipped');
  h.assert(texts(api.style()).join('').includes('.mw-toggle > [hidden], .mw-page [hidden], .mw-row[hidden] { display: none; }'), 'toggle and row hiding works outside mw-page');
  h.assert(!/go via VPN/.test((await renderLists({ provider: {}, lists: {} }))._mode.cfgvalue()), 'unknown mode: no guessed meaning');
  {
@@ -2776,6 +2776,9 @@ seq(async () => {
   h.assertEq(field.cfgvalue(), 'example.com direct\n', 'saved rules stay visible');
   h.assertEq(texts(field.renderWidget()).some(t => t.startsWith('Site recognition is not enabled')), !available, 'recognition note only without sniffing: ' + sniff);
  }
+ await traffic.render([lists, { mode: 'direct-first', sniff: 'tls', sniff_skipped_targets: ['proxy'] }, {}]);
+ const sniffWarning = texts(traffic.map.options._rules.renderWidget()).join(' ');
+ h.assert(sniffWarning.includes('proxy') && sniffWarning.includes('saved') && sniffWarning.includes('not applied') && sniffWarning.includes('replace'), 'My rules shows affected target and explains sniffing skip');
  // Direct-first needs no site recognition.
  for (const sniff of ['0', 'fakedns']) {
   await traffic.render([lists, { mode: 'direct-first', sniff }, {}]);

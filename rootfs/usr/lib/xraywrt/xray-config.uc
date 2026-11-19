@@ -574,21 +574,54 @@ function rule_targets(cfg) {
 	return {tags, reserved};
 }
 
-// What a line of My rules points at: an address or subnet, a link to a list
-// of them, or a site in the Xray domain syntax.
-function rule_what(word) {
-	let m = match(word, /^(.*)\/([0-9]+)$/), bits = m ? +m[2] : null;
-	let addr = iptoarr(m ? m[1] : word);
+// Return canonical decimal port syntax, distinct from an omitted qualifier.
+function selector_ports(text) {
+	let ports = [];
+	for (let part in split(text, ',')) {
+		let m = match(part, /^([0-9]+)(-([0-9]+))?$/);
+		if (!m || +m[1] < 1 || +(m[3] ?? m[1]) > 65535 || +(m[3] ?? m[1]) < +m[1]) return null;
+		push(ports, '' + (+m[1]) + (m[3] != null ? '-' + (+m[3]) : ''));
+	}
+	return join(',', ports);
+}
+
+function selector_text(e) {
+	return e.value + (e.ports || e.proto ? ';' + e.ports : '') + (e.proto ? ';' + e.proto : '');
+}
+
+function address_selector(word, cached) {
+	let parts = split(word, ';'), value = parts[0], ports = '', proto = parts[2] ?? '';
+	if (length(parts) > 3 || (length(parts) == 3 && !(proto in ['tcp', 'udp']))) return null;
+	if (length(parts) == 2 || parts[1]) {
+		ports = selector_ports(parts[1]);
+		if (ports == null) return null;
+	}
+	let m = match(value, /^(.*)\/([0-9]+)$/), bits = m ? +m[2] : null;
+	let addr = iptoarr(m ? m[1] : value);
 	if (addr) {
 		if (bits != null && bits > length(addr) * 8) return null;
-		return {kind: 'ip', value: arrtoip(addr) + (bits != null ? '/' + bits : '')};
+		return {kind: 'ip', value: arrtoip(addr) + (bits != null ? '/' + bits : ''), ports, proto, family: length(addr) == 4 ? 'ip' : 'ip6'};
 	}
+	if (cached && value == '' && (ports || proto)) return {kind: 'ip', value, ports, proto, family: 'any'};
 	// A link needs a path: https://youtube.com is a site, written without the scheme.
-	if (match(word, /^https?:\/\/[^\/;[:space:][:cntrl:]]+\/[^;[:space:][:cntrl:]]+$/)) return {kind: 'url', value: word};
+	if (!cached && match(value, /^https?:\/\/[^\/;[:space:][:cntrl:]]+\/[^;[:space:][:cntrl:]]+$/)) return {kind: 'url', value, ports, proto};
+	return null;
+}
+
+function rule_what(word) {
+	let selector = address_selector(word);
+	if (selector) return selector;
 	// 1.2.3.4-1.2.3.9 is a mistyped address, not a site.
-	if (match(word, /^[0-9.-]+$/)) return null;
-	let site = fake_entry(word);
-	return site != null ? {kind: 'site', value: site} : null;
+	if (match(split(word, ';')[0], /^[0-9.-]+$/)) return null;
+	if (substr(word, 0, 7) == 'regexp:') {
+		let site = fake_entry(word);
+		return site != null ? {kind: 'site', value: site, ports: '', proto: ''} : null;
+	}
+	let parts = split(word, ';'), site = fake_entry(parts[0]);
+	if (site == null) return null;
+	if (length(parts) == 1) return {kind: 'site', value: site, ports: '', proto: ''};
+	let qualifiers = address_selector('0.0.0.0;' + join(';', slice(parts, 1)));
+	return qualifiers ? {kind: 'site', value: site, ports: qualifiers.ports, proto: qualifiers.proto} : null;
 }
 
 // Lines of My rules: `<what> <target>`, `#` starts a comment. `error` is
@@ -603,6 +636,7 @@ function parse_rules(text, tags) {
 		let e = {line: number, text: line, ...(what ?? {}), target: words[1]};
 		if (!what || length(words) > 2) e.error = 'bad_entry';
 		else if (length(words) < 2) e.error = 'no_target';
+		else if (e.kind == 'site' && (e.ports || e.proto) && e.target == 'core') e.error = 'qualified_domain_core';
 		else if (!(e.target in RULE_WORDS) && !(e.target in tags)) e.error = 'unknown_target';
 		push(out, e);
 	}
@@ -621,12 +655,14 @@ function check_rules(text, tags) {
 
 // Addresses, subnets and list links of the usable lines that go direct, or all others.
 function rule_addresses(text, tags, direct) {
-	return map(filter(parse_rules(text, tags), (e) => !e.error && e.kind != 'site' && (e.target == 'direct') == direct), (e) => e.value);
+	return map(filter(parse_rules(text, tags), (e) => !e.error && e.kind != 'site' && (e.target == 'direct') == direct), selector_text);
 }
 
-// List links whose target is a tag: their addresses are routing conditions.
+// A tag can use cached rows directly or be shadowed by a direct/core list.
 function rule_routed_urls(text, tags) {
-	return uniq(map(filter(parse_rules(text, tags), (e) => !e.error && e.kind == 'url' && !(e.target in RULE_WORDS)), (e) => e.value));
+	let entries = filter(parse_rules(text, tags), (e) => !e.error && e.kind != 'site');
+	if (!length(filter(entries, (e) => !(e.target in RULE_WORDS)))) return [];
+	return uniq(map(filter(entries, (e) => e.kind == 'url'), (e) => e.value));
 }
 
 // Every list link of My rules, whatever its target: its cache stays.
@@ -634,27 +670,234 @@ function rule_urls(text) {
 	return uniq(map(filter(parse_rules(text, []), (e) => e.kind == 'url' && (e.error == null || e.error == 'unknown_target')), (e) => e.value));
 }
 
-// Addresses and subnets of the cached fetch of a remote list. Anything else
-// (an entry with ports, a MAC, text) cannot be a routing condition.
-function cached_ips(path, api) {
-	let list = [];
-	for (let line in split(path ? api.readfile(path) ?? '' : '', '\n')) {
-		let what = rule_what(line);
-		if (what?.kind == 'ip') push(list, what.value);
+// Both renderers consume the same expanded selector; URL qualifiers fill only
+// missing row fields, and a conflicting explicit transport excludes the row.
+function each_address(e, remote, readfile, visit) {
+	if (e.kind != 'url') { visit(e); return; }
+	let path = remote?.[e.value];
+	for (let line in split(path ? readfile(path) ?? '' : '', '\n')) {
+		let row = address_selector(line, true);
+		if (!row || (row.proto && e.proto && row.proto != e.proto)) continue;
+		row.ports ||= e.ports;
+		row.proto ||= e.proto;
+		if (!visit(row)) break;
 	}
-	return list;
+}
+
+// Sniffing can replace real packet destinations before named IP routing.
+function sniff_overrides(sniffing, row) {
+ if (!(row.ports || row.proto) || sniffing?.enabled != true || sniffing.routeOnly == true) return false;
+ let types = map(sniffing.destOverride ?? [], (name) => type(name) == 'string' ? lc(name) : '');
+ return ((!row.proto || row.proto == 'tcp') && ('http' in types || 'tls' in types)) ||
+  ((!row.proto || row.proto == 'udp') && 'quic' in types);
+}
+
+// Expand and cap named-target runs identically for Xray and nft.
+function expand_address_run(run, remote, readfile, sniffing) {
+ let rows = [], seen = {}, urls = {}, capped = !(run.target in RULE_WORDS);
+ for (let e in run.items) {
+  if (e.kind == 'url') {
+   let key = selector_text(e);
+   if (urls[key]) continue;
+   urls[key] = true;
+  }
+  each_address(e, remote, readfile, (row) => {
+   if (capped && sniff_overrides(sniffing, row)) { run.rejected = true; return true; }
+   let key = selector_text(row);
+   if (seen[key]) return true;
+   seen[key] = true;
+   push(rows, row);
+   return !capped || length(rows) <= RULE_IPS_LIMIT;
+  });
+  if (capped && length(rows) > RULE_IPS_LIMIT) break;
+ }
+ return rows;
+}
+
+// Expand before claiming: a rejected tuple cannot hide a later fallback.
+function prepare_address_run(run, remote, readfile, sniffing) {
+ run.rows = expand_address_run(run, remote, readfile, sniffing);
+ if (!(run.target in RULE_WORDS) && length(run.rows) > RULE_IPS_LIMIT) {
+  run.oversized = true;
+  run.rejected = true;
+  run.rows = [];
+ }
+}
+
+// An ordered packet policy is needed only when the expanded input contains a
+// selector. Plain legacy lists retain their direct-before-intercept policy.
+function rule_packet_addresses(text, tags, remote, readfile, sniffing) {
+ let runs = [], entries = {}, site_core = {}, sites = 0;
+ for (let e in parse_rules(text, tags)) {
+  if (e.error) continue;
+  let key = selector_text(e);
+  if (e.kind == 'site' && (entries[key] || site_core[e.value])) continue;
+  if (e.kind == 'site') entries[key] = true;
+  if (e.kind == 'site' && e.target == 'core') site_core[e.value] = true;
+  if (e.kind == 'site' && sites++ >= FAKE_LIMIT) continue;
+  let kind = e.kind == 'site' ? 'site' : 'ip', last = runs[-1];
+  if (last && last.kind == kind && last.target == e.target && (kind != 'site' || (last.ports == e.ports && last.proto == e.proto))) push(last.items, e);
+  else push(runs, {kind, target: e.target, ports: e.ports, proto: e.proto, items: [e]});
+ }
+ let rows = [], seen = {}, ordered = false, skipped = false;
+ for (let run in runs) {
+  if (run.kind != 'ip') continue;
+  prepare_address_run(run, remote, readfile, sniffing);
+  if (run.rejected) skipped = true;
+  for (let row in run.rows) if (row.ports || row.proto) ordered = true;
+ }
+ let packet_runs = filter(runs, (run) => run.kind == 'ip');
+ if (!ordered) packet_runs = [...filter(packet_runs, (run) => run.target == 'direct'), ...filter(packet_runs, (run) => run.target != 'direct')];
+ for (let run in packet_runs) for (let row in run.rows) {
+  let key = selector_text(row);
+  if (seen[key]) continue;
+  seen[key] = true;
+  push(rows, [run.target == 'direct' ? 'direct' : 'proxy', row.family, row.value, row.ports, row.proto]);
+ }
+
+ if (skipped && !length(rows)) return [['# skipped oversized run']];
+ return ordered || skipped ? rows : [];
+}
+
+// Xray has no rule that resumes provider routing. Subtract preceding core
+// and direct tuples from later tag rules; the untouched provider rules then
+// choose the outbound for core, and nft remains responsible for bypass.
+const NIBBLE_BITS = ['0000', '0001', '0010', '0011', '0100', '0101', '0110', '0111',
+	'1000', '1001', '1010', '1011', '1100', '1101', '1110', '1111'];
+
+function address_prefix(value) {
+	let parts = split(value, '/'), addr = iptoarr(parts[0]), bits = '';
+	for (let byte in addr) bits += NIBBLE_BITS[byte >> 4] + NIBBLE_BITS[byte & 15];
+	return substr(bits, 0, parts[1] != null ? +parts[1] : length(bits));
+}
+
+function prefix_address(prefix, family) {
+	let width = family == 'ip' ? 32 : 128, bytes = [];
+	for (let i = 0; i < width; i += 8) {
+		let chunk = substr(prefix, i, 8), byte = 0;
+		for (let j = 0; j < length(chunk); j++) byte |= +(substr(chunk, j, 1)) << (7 - j);
+		push(bytes, byte);
+	}
+	return arrtoip(bytes) + (length(prefix) < width ? '/' + length(prefix) : '');
+}
+
+function port_ranges(ports) {
+	return ports ? map(split(ports, ','), (p) => {
+		let bounds = split(p, '-');
+		return [+bounds[0], +(bounds[1] ?? bounds[0])];
+	}) : [[0, 65535]];
+}
+
+function subtract_ports(ports, excluded) {
+	for (let cut in excluded) {
+		let lo = cut[0], hi = cut[1];
+		let rest = [], changed = false;
+		for (let part in ports) {
+			let a = part[0], b = part[1];
+			if (hi < a || lo > b) { push(rest, part); continue; }
+			changed = true;
+			if (a < lo) push(rest, [a, lo - 1]);
+			if (hi < b) push(rest, [hi + 1, b]);
+		}
+		if (changed) ports = rest;
+		if (!length(ports)) break;
+	}
+	return ports;
+}
+
+function add_address_shadow(shadows, row) {
+	let prefix = row.value ? address_prefix(row.value) : '', ports = port_ranges(row.ports);
+	for (let family in (row.family == 'any' ? ['ip', 'ip6'] : [row.family])) {
+		for (let proto in (row.proto ? [row.proto] : ['tcp', 'udp'])) {
+			let node = shadows[family + proto] ??= {};
+			for (let i = 0; i < length(prefix); i++) node = node[substr(prefix, i, 1)] ??= {};
+			node.ports ??= [];
+			push(node.ports, ...ports);
+		}
+	}
+}
+
+// Descend only prefixes containing shadows. Identical child port sets merge
+// again so irrelevant shadow ports do not fragment a rule.
+function unshadowed_prefix(node, ports) {
+	if (!node) return ports;
+	if (node.ports) ports = subtract_ports(ports, node.ports);
+	if (!length(ports) || !(node[0] || node[1])) return ports;
+	let left = unshadowed_prefix(node[0], ports);
+	let right = unshadowed_prefix(node[1], ports);
+	if (left == right || (type(left) == 'array' && type(right) == 'array' && sprintf('%J', left) == sprintf('%J', right))) return left;
+	return {left, right};
+}
+
+function emit_unshadowed(out, part, bits, prefix, ports, row, family, proto) {
+	if (type(part) == 'object') {
+		emit_unshadowed(out, part.left, bits + '0', prefix, ports, row, family, proto);
+		emit_unshadowed(out, part.right, bits + '1', prefix, ports, row, family, proto);
+	} else if (length(part)) {
+		let value = bits == prefix && row.value ? row.value : prefix_address(bits, family);
+		let ports_text = part == ports ? row.ports : join(',', map(part, (r) => r[0] == r[1] ? '' + r[0] : r[0] + '-' + r[1]));
+		push(out, {value, ports: ports_text, proto});
+	}
+}
+
+function unshadowed_address(shadows, row) {
+	if (!length(keys(shadows))) return [row];
+	let prefix = row.value ? address_prefix(row.value) : '', ports = port_ranges(row.ports), out = [], changed = false;
+	for (let family in (row.family == 'any' ? ['ip', 'ip6'] : [row.family])) {
+		for (let proto in (row.proto ? [row.proto] : ['tcp', 'udp'])) {
+			let node = shadows[family + proto], remaining = ports;
+			for (let i = 0; node && i < length(prefix) && length(remaining); i++) {
+				if (node.ports) remaining = subtract_ports(remaining, node.ports);
+				node = node[substr(prefix, i, 1)];
+			}
+			let ranges = length(remaining) ? unshadowed_prefix(node, remaining) : remaining;
+			if (ranges != ports) changed = true;
+			emit_unshadowed(out, ranges, prefix, prefix, ports, row, family, proto);
+		}
+	}
+	return changed ? out : [row];
+}
+
+function address_route_rules(rows, shadows, ref, tag, nonpacket) {
+	let groups = {}, rules = [];
+	for (let row in rows) {
+		let parts = unshadowed_address(shadows, row);
+		if (!row.ports && !row.proto && !(length(parts) == 1 && parts[0] == row)) {
+			push(rules, {ip: row.value ? [row.value] : ['0.0.0.0/0', '::/0'], inboundTag: nonpacket});
+		}
+		for (let e in parts) {
+			let key = e.ports + ';' + e.proto;
+			let group = groups[key];
+			if (!group) {
+				let rule = {ip: []};
+				if (e.ports) rule.port = e.ports;
+				if (e.proto) rule.network = e.proto;
+				// Packet selectors must not be applied to Xray's own DNS queries.
+				if (e.ports || e.proto) rule.inboundTag = ['xraywrt-tproxy4', 'xraywrt-tproxy6'];
+				push(rules, rule);
+				group = groups[key] = {rule, seen: {}};
+			}
+			// A cache may contain an address wildcard scoped by port or transport.
+			for (let ip in (e.value ? [e.value] : ['0.0.0.0/0', '::/0'])) {
+				if (group.seen[ip]) continue;
+				group.seen[ip] = true;
+				push(group.rule.ip, ip);
+			}
+		}
+	}
+	return map(rules, (rule, i) => ({...rule, ...ref, ruleTag: i ? tag + '-' + (i + 1) : tag}));
 }
 
 // My rules (spec 11): the own lines of the router, in order. Adjacent lines
 // with the same target and kind make one run, so a run is one DNS server
 // entry and one routing rule and first-match order is that of the lines.
 // Returns the DNS entries and routing rules for the generator.
-function own_rules(cfg, params, api, profile, original_dns_tag) {
+function own_rules(cfg, params, api, profile, original_dns_tag, sniffing) {
 	let found = rule_targets(cfg), balancers = map(type(cfg.routing?.balancers) == 'array' ? cfg.routing.balancers : [], (b) => b?.tag);
 	for (let tag in found.tags) profile_record(profile, 'rules-target', tag);
 	for (let tag in found.reserved) profile_record(profile, 'rules-reserved', tag);
 	let text = params.rules_file ? api.readfile(params.rules_file) : null;
-	let runs = [], seen = {}, missing = [], sites = 0, limited = false;
+	let runs = [], seen = {}, site_core = {}, missing = [], sites = 0, limited = false;
 	for (let e in parse_rules(text, found.tags)) {
 		if (e.error == 'unknown_target') {
 			if (!(e.target in missing)) push(missing, e.target);
@@ -664,8 +907,10 @@ function own_rules(cfg, params, api, profile, original_dns_tag) {
 			warn_code(profile, 'rule_ignored', 'My rules: line %s "%s" ignored', e.line, e.text);
 			continue;
 		}
-		if (seen[e.value]) continue;
-		seen[e.value] = true;
+		let key = selector_text(e);
+		if (e.kind == 'site' && (seen[key] || site_core[e.value])) continue;
+		if (e.kind == 'site') seen[key] = true;
+		if (e.kind == 'site' && e.target == 'core') site_core[e.value] = true;
 		let kind = e.kind == 'site' ? 'site' : 'ip';
 		if (kind == 'site' && sites >= FAKE_LIMIT) {
 			if (!limited) warn_code(profile, 'rules_limit', 'My rules has more than %s sites, the rest is ignored', FAKE_LIMIT);
@@ -674,8 +919,8 @@ function own_rules(cfg, params, api, profile, original_dns_tag) {
 		}
 		if (kind == 'site') sites++;
 		let last = runs[-1];
-		if (last && last.kind == kind && last.target == e.target) push(last.items, e);
-		else push(runs, {kind, target: e.target, items: [e]});
+		if (last && last.kind == kind && last.target == e.target && (kind != 'site' || (last.ports == e.ports && last.proto == e.proto))) push(last.items, e);
+		else push(runs, {kind, target: e.target, ports: e.ports, proto: e.proto, items: [e]});
 	}
 	if (length(missing)) warn_code(profile, 'rules_target_missing', 'My rules: the targets %s are not in the configuration, their lines are skipped', join(', ', missing));
 	// UX 4.2: fake-IP sniffing alone cannot recognize arbitrary direct sites in
@@ -683,15 +928,31 @@ function own_rules(cfg, params, api, profile, original_dns_tag) {
 	// never reach the core and need no recognition.
 	let sniff = filter(profile, (l) => substr(l, 0, 6) == 'sniff ')[0];
 	let recognizes = length(filter(split(substr(sniff ?? '', 6), ','), (s) => s in ['http', 'tls', 'quic'])) > 0;
-	let direct_sites = filter(runs, (r) => r.kind == 'site' && r.target == 'direct');
+	let direct_sites = filter(runs, (r) => r.kind == 'site' && r.target == 'direct' && !r.ports && !r.proto);
 	if (params.mode != 'direct-first' && length(direct_sites) && !recognizes) {
 		warn_code(profile, 'direct_no_sniffing', 'direct domains ignored: the provider config has no sniffing');
-		runs = filter(runs, (r) => !(r.kind == 'site' && r.target == 'direct'));
+		runs = filter(runs, (r) => !(r.kind == 'site' && r.target == 'direct' && !r.ports && !r.proto));
 	}
 	// Direct sites in direct-first get a real address from a general server:
 	// one limited to its own domains may not answer these.
 	let plain = filter(cfg.dns.servers, (s) => !is_fakedns(s));
 	let server = filter(plain, (s) => type(s) != 'object' || !length(s.domains))[0] ?? plain[0];
+	let shadows = {}, ordered = false, claimed = {};
+	for (let run in runs) {
+		if (run.kind != 'ip') continue;
+		prepare_address_run(run, params.rules_remote, api.readfile, sniffing);
+		if (run.rejected && !run.oversized) {
+			profile_record(profile, 'rules-sniff-skipped-target', run.target);
+			warn_code(profile, 'rules_sniff_override', 'My rules: qualified named address selectors incompatible with sniffing are skipped');
+		}
+		for (let row in run.rows) if (row.ports || row.proto) ordered = true;
+		run.rows = filter(run.rows, (row) => {
+			let key = selector_text(row);
+			if (claimed[key]) return false;
+			claimed[key] = true;
+			return true;
+		});
+	}
 	let dns = [], rules = [], direct_count = 0, fake_count = 0;
 	for (let i, run in runs) {
 		let values = map(run.items, (e) => e.value), ref;
@@ -699,6 +960,13 @@ function own_rules(cfg, params, api, profile, original_dns_tag) {
 		else if (run.target in balancers) ref = {balancerTag: run.target};
 		else ref = {outboundTag: run.target};
 		if (run.kind == 'site') {
+			if (run.ports || run.proto) {
+				let rule = {domain: values, inboundTag: ['xraywrt-tproxy4', 'xraywrt-tproxy6'], ...ref, ruleTag: sprintf('xraywrt-rule-%d', i + 1)};
+				if (run.ports) rule.port = run.ports;
+				if (run.proto) rule.network = run.proto;
+				push(rules, rule);
+				continue;
+			}
 			if (run.target == 'direct') {
 				direct_count += length(values);
 				if (params.mode == 'direct-first') {
@@ -713,24 +981,13 @@ function own_rules(cfg, params, api, profile, original_dns_tag) {
 				push(dns, {address: 'fakedns', domains: values, skipFallback: true, queryStrategy: 'UseIPv4'});
 			}
 			if (run.target != 'core') push(rules, {domain: values, ...ref, ruleTag: sprintf('xraywrt-rule-%d', i + 1)});
-		} else if (run.target != 'direct' && run.target != 'core') {
-			// Addresses to direct bypass in nft; core ones need no routing rule.
-			let ips = [], got = {};
-			for (let e in run.items) {
-				for (let ip in (e.kind == 'url' ? cached_ips(params.rules_remote?.[e.value], api) : [e.value])) {
-					if (got[ip]) continue;
-					got[ip] = true;
-					push(ips, ip);
-					if (length(ips) > RULE_IPS_LIMIT) break;
-				}
-				if (length(ips) > RULE_IPS_LIMIT) break;
-			}
+		} else if (run.target in RULE_WORDS) {
+			if (ordered) for (let row in run.rows) add_address_shadow(shadows, row);
+		} else if (run.oversized) {
 			// A list that grew must not stop the start: skip the rule, tell Home.
-			if (length(ips) > RULE_IPS_LIMIT) {
-				warn_code(profile, 'rules_too_large', 'My rules: the rule "%s" has more than %s addresses and is skipped', run.target, RULE_IPS_LIMIT);
-				continue;
-			}
-			if (length(ips)) push(rules, {ip: ips, ...ref, ruleTag: sprintf('xraywrt-rule-%d', i + 1)});
+			warn_code(profile, 'rules_too_large', 'My rules: the rule "%s" has more than %s addresses and is skipped', run.target, RULE_IPS_LIMIT);
+		} else {
+			push(rules, ...address_route_rules(run.rows, shadows, ref, sprintf('xraywrt-rule-%d', i + 1), uniq([DNS_TAG, ...map(cfg.inbounds ?? [], (ib) => ib.tag ?? ''), ...map(cfg.dns.servers ?? [], (server) => type(server) == 'object' ? server.tag ?? '' : '')])));
 		}
 	}
 	profile_record(profile, 'direct-domains', direct_count);
@@ -951,7 +1208,7 @@ function generate(text, params, api) {
 	let pf = filter(profile, (l) => substr(l, 0, 28) == 'set dns_forward_other_types ');
 	if (length(pf) && !params.dns_forward_override) params.dns_forward_other_types = substr(pf[0], 28);
 	let sniffing = provider_sniffing(cfg);
-	let sniff = sniffing?.enabled == true ? join(',', sniffing.destOverride ?? []) : '';
+	let sniff = sniffing?.enabled == true ? join(',', map(sniffing.destOverride ?? [], (name) => type(name) == 'string' ? lc(name) : '')) : '';
 	profile_record(profile, 'sniff', (sniff || '0'));
 	if (!sniff && length(filter(type(cfg.routing?.rules) == 'array' ? cfg.routing.rules : [], (r) => r?.domain != null)))
 		warn_code(profile, 'provider_no_sniffing', 'the provider config has no sniffing: domain rules see only IP addresses');
@@ -986,7 +1243,7 @@ function generate(text, params, api) {
 		profile = filter(profile, (l) => !match(l, / \[E:dns_wan\]$/));
 		if (params.mode != 'direct-first') warn_code(profile, 'dns_wan', 'no proxy DNS configured, using WAN DNS');
 	}
-	let own = own_rules(cfg, params, api, profile, original_dns_tag);
+	let own = own_rules(cfg, params, api, profile, original_dns_tag, sniffing);
 	let fake = router_fakedns(cfg, params, own, profile);
 	check_inbound_ports(cfg, params);
 	push(cfg.inbounds, ...router_inbounds(params, fake, sniffing));
@@ -1052,4 +1309,4 @@ function outbound_delta(old, next) {
 	};
 }
 
-return { generate, profiles, dns_outbounds, diff_sections, outbound_delta, code_message, geodata_files, rule_targets, check_rules, rule_addresses, rule_urls, rule_routed_urls };
+return { generate, profiles, dns_outbounds, diff_sections, outbound_delta, code_message, geodata_files, rule_targets, check_rules, rule_addresses, rule_urls, rule_routed_urls, rule_packet_addresses };

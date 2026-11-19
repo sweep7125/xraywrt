@@ -52,6 +52,45 @@ assert_file_contains "$tmpdir/v6" ";53" "port-only entry in v6"
 assert_file_not_contains "$tmpdir/v4" "999.1.1.1" "invalid entry skipped"
 pass "mixed families resolved"
 
+# Provider selectors retain transport and port conditions for both families.
+printf '1.1.1.1;443;udp\n2001:db8::1;;tcp\n1.1.1.2;80-90;tcp\n1.1.1.3;443;sctp\n' | set_dst
+lists_resolve dst "$tmpdir/v4" "$tmpdir/v6" 2>/dev/null
+assert_eq $'1.1.1.1;443;udp\n1.1.1.2;80-90;tcp' "$(cat "$tmpdir/v4")" 'provider IPv4 transport selectors validated'
+assert_eq '2001:db8::1;;tcp' "$(cat "$tmpdir/v6")" 'provider IPv6 all-port transport selector'
+pass 'provider transport selectors'
+assert_eq '1.1.1.1;443;udp' "$(printf '1.1.1.1;443;udp\n' | lists_classify 1 src)" 'device lists do not accept transport selectors'
+printf 'https://lists.example.com/a.txt;80;udp\nhttps://lists.example.com/a.txt;;tcp\n' | set_dst
+lists_resolve dst "$tmpdir/v4" "$tmpdir/v6" 2>/dev/null
+assert_file_contains "$tmpdir/v4" '8.8.8.0/24;80;udp' 'remote address inherits UDP and ports'
+assert_file_contains "$tmpdir/v6" '2606:4700::1;8443;udp' 'remote port override retains UDP'
+assert_file_contains "$tmpdir/v6" '2606:4700::1;8443;tcp' 'same cache retains TCP selector'
+pass 'remote transport inheritance'
+(
+ cache="$(lists_cache_file https://lists.example.com/a.txt)"
+ cp "$cache" "$tmpdir/selector-cache-backup"
+ printf '203.0.113.1;;tcp\n203.0.113.2;123;udp\n2001:db8::1;;tcp\n2001:db8::2;456;udp\n' >"$cache"
+ printf 'https://lists.example.com/a.txt;;udp\n' | set_dst
+ lists_resolve dst "$tmpdir/v4" "$tmpdir/v6" 2>/dev/null
+ assert_eq '203.0.113.2;123;udp' "$(cat "$tmpdir/v4")" 'URL UDP excludes conflicting IPv4 TCP rows'
+ assert_eq '2001:db8::2;456;udp' "$(cat "$tmpdir/v6")" 'URL UDP excludes conflicting IPv6 TCP rows'
+ cp "$tmpdir/selector-cache-backup" "$cache"
+)
+pass 'URL transport constrains cached rows'
+(
+ mkdir -p "$tmpdir/inheritance-cache"
+ POLICY_CACHE_DIR="$tmpdir/inheritance-cache"
+ printf '203.0.113.2;;udp\n2001:db8::2;;udp\n' >"$(lists_cache_file https://lists.example.com/a.txt)"
+ printf 'https://lists.example.com/a.txt;443;udp\n' | set_dst
+ lists_resolve dst "$tmpdir/v4" "$tmpdir/v6"
+ assert_eq '203.0.113.2;443;udp' "$(cat "$tmpdir/v4")" 'an explicit row protocol still inherits IPv4 URL ports'
+ assert_eq '2001:db8::2;443;udp' "$(cat "$tmpdir/v6")" 'an explicit row protocol still inherits IPv6 URL ports'
+)
+
+printf 'https://lists.example.com/a.txt;80;invalid\n' | set_dst
+lists_resolve dst "$tmpdir/v4" "$tmpdir/v6" 2>/dev/null
+[[ ! -s "$tmpdir/v4" && ! -s "$tmpdir/v6" ]] || fail 'invalid URL selector must not broaden cached entries'
+printf 'https://lists.example.com/a.txt;80\n' | set_dst
+
 http_fetch() {
 	FETCH_ERROR=network
 	return 1
@@ -359,9 +398,11 @@ rules_check() {
  assert_file_contains "$tmpdir/rules.err" "$3" "rules error: $2"
  assert_eq 'old.example core' "$(cat "$RULES_FILE")" "rules kept after: $2"
 }
+rules_check $'a.example;443;sctp proxy\n' 'invalid domain protocol' '[E:rules_bad_entry|1|a.example;443;sctp proxy]'
+rules_check $'a.example;443;udp core\n' 'qualified domain core' '[E:rules_qualified_domain_core|1|a.example;443;udp core]'
 rules_check $'a.example direct\nb.example\n' 'no target' '[E:rules_no_target|2|b.example|direct, core, proxy, pool]'
 rules_check $'a.example gone\n' 'unknown target' '[E:rules_unknown_target|1|a.example gone|gone|direct, core, proxy, pool]'
-rules_check $'a.example direct\n\n1.2.3.4;443 direct\n' 'ports' '[E:rules_bad_entry|3|1.2.3.4;443 direct]'
+rules_check $'a.example direct\n\n1.2.3.4;443-80 direct\n' 'inverted port range' '[E:rules_bad_entry|3|1.2.3.4;443-80 direct]'
 rules_check $'a.example proxy extra\n' 'extra word' '[E:rules_bad_entry|1|a.example proxy extra]'
 rules_check $'bad host direct\n' 'bad site' '[E:rules_bad_entry|1|bad host direct]'
 rules_check $'aa:bb:cc:dd:ee:ff core\n' 'a MAC is not an address of My rules' '[E:rules_bad_entry|1|aa:bb:cc:dd:ee:ff core]'

@@ -68,6 +68,19 @@ pass 'applied ruleset hash skips identical and upgrades legacy cache'
  pass 'plain-entry predicate handles missing, empty, scoped and mixed lists'
 )
 
+# Transport selectors constrain both port-qualified and all-port rules.
+(
+ NFT_FILE="$tmpdir/selector.nft"
+ printf '1.1.1.1;443;udp\n' >"$tmpdir/selectors4"
+ printf '2001:db8::1;;tcp\n' >"$tmpdir/selectors6"
+ : >"$NFT_FILE"
+ nft_port_rules prerouting_policy "$tmpdir/selectors4" ip daddr accept
+ nft_port_rules prerouting_policy "$tmpdir/selectors6" ip6 daddr accept
+ assert_file_contains "$NFT_FILE" 'ip daddr { 1.1.1.1 } meta l4proto udp th dport { 443 } accept' 'UDP selector matches only UDP port 443'
+ assert_file_contains "$NFT_FILE" 'ip6 daddr { 2001:db8::1 } meta l4proto tcp accept' 'IPv6 TCP selector covers every port'
+ pass 'transport selector nft rules'
+)
+
 # Port rules group exact specs in first-appearance order, with bounded chunks.
 (
  NFT_FILE="$tmpdir/port-rules.nft"
@@ -172,7 +185,7 @@ settings_load
 POLICY_MODE=direct-first
 out="$tmpdir/ruleset.nft"
 
-# Own sites and addresses are My rules; entries with ports come only from the provider's list.
+# Legacy bare personal rules and port selectors in the provider list.
 printf '1.1.1.1 core\n2001:db8::/32 core\n77.88.8.8 direct\n2a02:6b8::/32 direct\n' >"$RULES_FILE"
 printf 'profile-schema 1\nhas proxy-ips\nproxy-ip 9.9.9.9;443\nproxy-ip 2606:4700::1;80-90\nproxy-ip ;53\n' >"$PROFILE_FILE"
 printf '192.168.1.10\nfd00::10\n' >"$SRC_LIST_FILE"
@@ -181,6 +194,63 @@ render() {
 	mkdir -p "$tmpdir/work"
 	nft_render "$out" "$tmpdir/work"
 }
+
+# Full render keeps each provider selector in its address family and mode.
+(
+ PROFILE_FILE="$tmpdir/selector-profile"
+ RULES_FILE="$tmpdir/selector-rules"
+ : >"$RULES_FILE"
+ printf 'profile-schema 1\nhas proxy-ips\nhas direct-ips\nproxy-ip 203.0.113.41;4567;udp\nproxy-ip 2001:db8::41;;tcp\ndirect-ip 203.0.113.42;4567;udp\ndirect-ip 2001:db8::42;;tcp\n' >"$PROFILE_FILE"
+ for POLICY_MODE in direct-first proxy-first; do
+  render
+  if [ "$POLICY_MODE" = direct-first ]; then
+   assert_file_contains "$out" 'ip daddr { 203.0.113.41 } meta l4proto udp th dport { 4567 }' 'direct-first IPv4 UDP mark'
+   assert_file_contains "$out" 'ip6 daddr { 2001:db8::41 } meta l4proto tcp' 'direct-first IPv6 TCP mark'
+   assert_file_not_contains "$out" '203.0.113.42 } meta l4proto' 'direct-first ignores provider direct selector'
+  else
+   assert_file_contains "$out" 'ip daddr { 203.0.113.42 } meta l4proto udp th dport { 4567 } return' 'proxy-first IPv4 UDP bypass'
+   assert_file_contains "$out" 'ip6 daddr { 2001:db8::42 } meta l4proto tcp return' 'proxy-first IPv6 TCP bypass'
+   assert_file_not_contains "$out" '203.0.113.41 } meta l4proto' 'proxy-first ignores provider proxy selector'
+  fi
+ done
+ pass 'full ruleset preserves selector families and mode applicability'
+)
+
+# The first matching personal action wins; legacy guards still control capture.
+test_ordered_personal_addresses() {
+ local PROFILE_FILE="$tmpdir/ordered-profile" RULES_FILE="$tmpdir/ordered-rules"
+ local POLICY_CACHE_DIR="$tmpdir/ordered-cache" DIRECT_SRC_LIST_FILE="$tmpdir/ordered-devices"
+ local DNS_MODE=redir-host POLICY_MODE action chain
+ printf 'profile-schema 1\nhas direct-ips\ndirect-ip 192.0.2.0/24\nrules-target tagged\n' >"$PROFILE_FILE"
+ printf '192.0.2.1/32;0443;udp tagged\n192.0.2.1 direct\n2001:db8::42;80-90;tcp direct\n2001:db8::42 core\n198.51.100.1 direct\nhttps://lists.example/selectors;4567;udp core\n' >"$RULES_FILE"
+ mkdir -p "$POLICY_CACHE_DIR"
+ printf '198.51.100.1;;udp\n2001:db8::43;;tcp\n' >"$(lists_cache_file https://lists.example/selectors)"
+ printf 'fd00::10\n' >"$DIRECT_SRC_LIST_FILE"
+ for POLICY_MODE in direct-first proxy-first; do
+  render
+  action='return'
+  [ "$POLICY_MODE" != direct-first ] || action="meta mark set meta mark | $NFT_INTERCEPT_MARK return"
+  assert_eq "$(printf '%s\n' "ip daddr { 192.0.2.1/32 } meta l4proto udp th dport { 443 } $action" 'ip daddr { 192.0.2.1 } accept' 'ip6 daddr { 2001:db8::42 } meta l4proto tcp th dport { 80-90 } accept' "ip6 daddr { 2001:db8::42 } meta l4proto { tcp, udp } $action" 'ip daddr { 198.51.100.1 } accept' "ip daddr { 198.51.100.1 } meta l4proto udp th dport { 4567 } $action")" \
+   "$(sed -n 's/^add rule inet xraywrt personal_addresses //p' "$out")" "$POLICY_MODE ordered IPv4/IPv6 selector actions"
+  for chain in prerouting_policy mangle_output; do
+   assert_file_contains "$out" "$chain jump personal_addresses" "$POLICY_MODE/$chain executes personal policy"
+   if [ "$POLICY_MODE" = proxy-first ]; then
+    assert_true "$chain provider bypass remains first" awk -v chain="$chain" '
+     $5 == chain && /ip daddr @direct_dst return/ { bypass = NR }
+     $5 == chain && /jump personal_addresses/ { own = NR }
+     END { exit !(bypass && own > bypass) }' "$out"
+   fi
+  done
+  if [ "$POLICY_MODE" = proxy-first ]; then
+   assert_true 'a personal core or tag returns to the direct-device bypass' awk '
+    $5 == "prerouting_policy" && /jump personal_addresses/ { own = NR }
+    $5 == "prerouting_policy" && /ip6 saddr @direct_src6 return/ { dev = NR }
+    END { exit !(own && dev > own) }' "$out"
+  fi
+ done
+}
+test_ordered_personal_addresses
+pass 'personal selectors run in file order in both modes and chains'
 
 # Disabled IPv6 must never receive an intercept mark without a local route.
 (
