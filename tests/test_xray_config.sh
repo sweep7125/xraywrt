@@ -42,7 +42,7 @@ for mode in proxy-first direct-first; do
  prof_has 'direct-domains 1'
  jq -e '.routing.rules[4] == {domain:["domain:example.com"],outboundTag:"xraywrt-direct",ruleTag:"xraywrt-rule-1"}' <<<"$out" >/dev/null || fail 'direct site rule before provider rules'
  if [ "$mode" = direct-first ]; then
-  jq -e '.dns.servers[0] == {address:"192.0.2.53",domains:["domain:example.com"],skipFallback:true}' <<<"$out" >/dev/null || fail 'real DNS precedes fakedns'
+  jq -e '.dns.servers[0] == {address:"192.0.2.53",domains:["domain:example.com"],skipFallback:true,finalQuery:true}' <<<"$out" >/dev/null || fail 'real DNS precedes fakedns'
  else
   jq -e '.dns.servers | all(.[]; type != "object" or .address == "fakedns")' <<<"$out" >/dev/null || fail 'proxy-first leaves DNS unchanged'
  fi
@@ -51,10 +51,10 @@ done
 jq '.dns.servers = [{address:"192.0.2.54",port:5353,domains:["domain:provider.test"],queryStrategy:"UseIPv4",skipFallback:false}]' "$FX/src/sniff-tproxy.json" >"$tmpdir/direct-dns.json"
 gen "$tmpdir/direct-dns.json" '.mode_override = true | .mode = "direct-first" | '"$(rules_filter)"
 assert_eq 0 "$rc" "direct DNS object generation: $errtxt"
-jq -e '.dns.servers[0] == {address:"192.0.2.54",port:5353,domains:["domain:example.com"],skipFallback:true}' <<<"$out" >/dev/null || fail 'direct DNS keeps address and port only'
+jq -e '.dns.servers[0] == {address:"192.0.2.54",port:5353,domains:["domain:example.com"],queryStrategy:"UseIPv4",skipFallback:true,finalQuery:true}' <<<"$out" >/dev/null || fail 'direct DNS keeps resolver policy and replaces its domains'
 jq '.dns.servers = [{address:"192.0.2.54",domains:["domain:provider.test"]},"192.0.2.55"]' "$FX/src/sniff-tproxy.json" >"$tmpdir/direct-dns.json"
 gen "$tmpdir/direct-dns.json" '.mode_override = true | .mode = "direct-first" | '"$(rules_filter)"
-jq -e '.dns.servers[0] == {address:"192.0.2.55",domains:["domain:example.com"],skipFallback:true}' <<<"$out" >/dev/null || fail 'direct DNS prefers a server without its own domains'
+jq -e '.dns.servers[0] == {address:"192.0.2.55",domains:["domain:example.com"],skipFallback:true,finalQuery:true}' <<<"$out" >/dev/null || fail 'direct DNS prefers a server without its own domains'
 cp "$tmpdir/rules.txt" "$tmpdir/rules-before.txt"
 for fixture in sniff-none sniff-disabled; do
  gen "$FX/src/$fixture.json" '.mode_override = true | .mode = "proxy-first" | '"$(rules_filter)"

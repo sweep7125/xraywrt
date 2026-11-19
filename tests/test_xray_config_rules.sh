@@ -36,10 +36,39 @@ for mode in direct-first proxy-first; do
 	core_test "$mode interleaved"
 done
 gen_rules direct-first $'a.test direct\nb.test direct\nc.test proxy\nd.test pool\ne.test direct'
-assert_eq '[{"address":"192.0.2.53","domains":["domain:a.test","domain:b.test"],"skipFallback":true},{"address":"fakedns","domains":["domain:c.test"],"skipFallback":true,"queryStrategy":"UseIPv4"},{"address":"fakedns","domains":["domain:d.test"],"skipFallback":true,"queryStrategy":"UseIPv4"},{"address":"192.0.2.53","domains":["domain:e.test"],"skipFallback":true},"192.0.2.53"]' "$(dns_servers)" 'direct-first: one DNS server entry per run, in line order'
+assert_eq '[{"address":"192.0.2.53","domains":["domain:a.test","domain:b.test"],"skipFallback":true,"finalQuery":true},{"address":"fakedns","domains":["domain:c.test"],"skipFallback":true,"queryStrategy":"UseIPv4"},{"address":"fakedns","domains":["domain:d.test"],"skipFallback":true,"queryStrategy":"UseIPv4"},{"address":"192.0.2.53","domains":["domain:e.test"],"skipFallback":true,"finalQuery":true},"192.0.2.53"]' "$(dns_servers)" 'direct-first: one DNS server entry per run, in line order'
 gen_rules proxy-first $'a.test direct\nc.test proxy'
 assert_eq '[{"address":"fakedns","domains":["domain:c.test"],"skipFallback":true,"queryStrategy":"UseIPv4"},"192.0.2.53"]' "$(dns_servers)" 'proxy-first: direct sites need no real-address DNS entry'
 pass 'My rules: runs of sites'
+
+# Model the provider's tagged DoH, including an overlapping FakeDNS domain.
+resolver='{"address":"https://dns.example/dns-query","port":443,"tag":"dns-direct","expectedIPs":["192.0.2.0/24"],"unexpectedIPs":["192.0.2.66"],"queryStrategy":"UseIPv4"}'
+fake='{"address":"fakedns","domains":["domain:overlap.example"],"skipFallback":true,"queryStrategy":"UseIPv4"}'
+src_json "{\"outbounds\":[$direct_ob,$proxy_ob],\"dns\":{\"servers\":[$fake,$resolver]},\"routing\":{\"rules\":[{\"inboundTag\":[\"dns-direct\"],\"outboundTag\":\"direct\"},{\"network\":\"tcp,udp\",\"outboundTag\":\"proxy\"}]},$sniffing}"
+gen_rules direct-first 'overlap.example direct'
+jq -e --argjson resolver "$resolver" --argjson fake "$fake" '
+ .dns.servers == [($resolver + {domains:["domain:overlap.example"],skipFallback:true,finalQuery:true}), $fake, $resolver]
+ and any(.routing.rules[]; .inboundTag == ["dns-direct"] and .outboundTag == "direct")
+' <<<"$out" >/dev/null || fail 'direct-first preserves tagged resolver policy and ends DNS selection after the match'
+core_test 'tagged direct DoH'
+gen_rules proxy-first 'overlap.example direct'
+jq -e --argjson resolver "$resolver" --argjson fake "$fake" '.dns.servers == [$fake, $resolver]' <<<"$out" >/dev/null || fail 'proxy-first DNS stays unchanged'
+pass 'My rules: direct DNS keeps provider policy without FakeDNS fallback'
+
+# A resolver sharing the provider DNS tag must follow the rewritten route.
+src_json "{\"outbounds\":[$direct_ob,$proxy_ob],\"dns\":{\"tag\":\"dns-direct\",\"servers\":[$fake,$resolver]},\"routing\":{\"rules\":[{\"inboundTag\":[\"dns-direct\"],\"outboundTag\":\"direct\"},{\"network\":\"tcp,udp\",\"outboundTag\":\"proxy\"}]},$sniffing}"
+gen_rules direct-first 'overlap.example direct'
+jq -e --argjson resolver "$resolver" --argjson fake "$fake" '
+ .dns.servers == [($resolver + {tag:"xraywrt-dns-internal",domains:["domain:overlap.example"],skipFallback:true,finalQuery:true}), $fake, $resolver]
+ and any(.routing.rules[]; .inboundTag == ["xraywrt-dns-internal"] and .outboundTag == "direct")
+' <<<"$out" >/dev/null || fail 'shared resolver tag follows rewritten DNS route without changing provider records'
+core_test 'shared DNS tag'
+gen_rules proxy-first 'overlap.example direct'
+jq -e --argjson resolver "$resolver" --argjson fake "$fake" '.dns.servers == [$fake, $resolver]' <<<"$out" >/dev/null || fail 'proxy-first preserves shared-tag provider records'
+pass 'My rules: shared DNS tag follows rewritten route'
+
+# Restore the common source for the remaining tests.
+src_json "{\"outbounds\":[$direct_ob,$proxy_ob,$second_ob],\"routing\":{\"balancers\":[{\"tag\":\"pool\",\"selector\":[\"proxy\",\"second\"]}]},$sniffing}"
 
 # The target decides the rule; core makes none; the first line of a name wins.
 gen_rules direct-first $'a.test core\nb.test core\nc.test proxy\na.test direct'

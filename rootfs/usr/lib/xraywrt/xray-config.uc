@@ -649,7 +649,7 @@ function cached_ips(path, api) {
 // with the same target and kind make one run, so a run is one DNS server
 // entry and one routing rule and first-match order is that of the lines.
 // Returns the DNS entries and routing rules for the generator.
-function own_rules(cfg, params, api, profile) {
+function own_rules(cfg, params, api, profile, original_dns_tag) {
 	let found = rule_targets(cfg), balancers = map(type(cfg.routing?.balancers) == 'array' ? cfg.routing.balancers : [], (b) => b?.tag);
 	for (let tag in found.tags) profile_record(profile, 'rules-target', tag);
 	for (let tag in found.reserved) profile_record(profile, 'rules-reserved', tag);
@@ -702,8 +702,10 @@ function own_rules(cfg, params, api, profile) {
 			if (run.target == 'direct') {
 				direct_count += length(values);
 				if (params.mode == 'direct-first') {
-					let entry = {address: type(server) == 'object' ? server.address : server, domains: values, skipFallback: true};
-					if (type(server) == 'object' && server.port != null) entry.port = server.port;
+					let resolver = type(server) == 'object' ? server : {address: server};
+					// A matching provider FakeDNS entry is not excluded by skipFallback.
+					let entry = {...resolver, domains: values, skipFallback: true, finalQuery: true};
+					if (type(original_dns_tag) == 'string' && entry.tag == original_dns_tag) entry.tag = DNS_TAG;
 					push(dns, entry);
 				}
 			} else {
@@ -970,6 +972,7 @@ function generate(text, params, api) {
 	let hosts = server_hosts(cfg);
 	for (let h in hosts) profile_record(profile, 'server-host', h);
 	apply_outbounds(cfg, params, profile);
+	let original_dns_tag = cfg.dns?.tag;
 	let direct_ips = router_dns(cfg, params, profile);
 	if (mode_source == 'auto') params.mode = infer_mode(cfg, profile);
 	// Keep the mode near provider settings in the line-oriented profile.
@@ -983,7 +986,7 @@ function generate(text, params, api) {
 		profile = filter(profile, (l) => !match(l, / \[E:dns_wan\]$/));
 		if (params.mode != 'direct-first') warn_code(profile, 'dns_wan', 'no proxy DNS configured, using WAN DNS');
 	}
-	let own = own_rules(cfg, params, api, profile);
+	let own = own_rules(cfg, params, api, profile, original_dns_tag);
 	let fake = router_fakedns(cfg, params, own, profile);
 	check_inbound_ports(cfg, params);
 	push(cfg.inbounds, ...router_inbounds(params, fake, sniffing));

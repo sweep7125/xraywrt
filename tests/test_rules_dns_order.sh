@@ -28,11 +28,11 @@ gen_rules() {
 cat >"$tmpdir/probe.js" <<'NODE'
 const dgram = require('dgram'), cp = require('child_process');
 const [ , , config, ...names ] = process.argv;
-const ask = (name) => new Promise((resolve) => {
+const ask = (name, timeout = 4000) => new Promise((resolve) => {
 	const socket = dgram.createSocket('udp4'), id = Math.floor(Math.random() * 65535);
 	const labels = name.split('.').flatMap((l) => [ Buffer.from([ l.length ]), Buffer.from(l) ]);
 	const query = Buffer.concat([ Buffer.from([ id >> 8, id & 255, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0 ]), ...labels, Buffer.from([ 0, 0, 1, 0, 1 ]) ]);
-	const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, 4000);
+	const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, timeout);
 	socket.on('message', (m) => {
 		clearTimeout(timer); socket.close();
 		if (!m.readUInt16BE(6)) return resolve('empty');
@@ -51,15 +51,28 @@ upstream.on('message', (m, r) => {
 	upstream.send(Buffer.concat([ head, Buffer.from([ 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 80 ]) ]), r.port, r.address);
 });
 upstream.bind(53, '127.0.0.1', async () => {
-	const core = cp.spawn(process.env.XRAY_TEST_BIN, [ 'run', '-c', config ], { stdio: 'ignore', env: { ...process.env, XRAY_LOCATION_ASSET: process.env.XRAY_TEST_ASSETS } });
-	await new Promise((r) => setTimeout(r, 1500));
-	for (const name of names) console.log(name + ' ' + await ask(name));
+	const core = cp.spawn(process.env.XRAY_TEST_BIN, [ 'run', '-c', config ], { env: { ...process.env, XRAY_LOCATION_ASSET: process.env.XRAY_TEST_ASSETS } });
+	core.stdout.pipe(process.stderr);
+	core.stderr.pipe(process.stderr);
+	let exit = null;
+	core.on('error', (err) => { exit = err.message; });
+	core.on('exit', (code, signal) => { exit = `code ${code}, signal ${signal}`; });
+	let ready = false;
+	for (let i = 0; i < 20 && exit === null; i++) {
+		if (await ask('readiness.example', 500) === 'real') { ready = true; break; }
+	}
+	if (!ready || exit !== null) {
+		console.error('core readiness failed: ' + (exit ?? 'timed out after 10 seconds'));
+		process.exitCode = 1;
+	} else {
+		for (const name of names) console.log(name + ' ' + await ask(name));
+	}
 	core.kill();
 	upstream.close();
 });
 NODE
 probe() {
-	XRAY_TEST_BIN="$XRAY_TEST_BIN" XRAY_TEST_ASSETS="$XRAY_TEST_ASSETS" node "$tmpdir/probe.js" "$tmpdir/runtime.json" "$@"
+	XRAY_TEST_BIN="$XRAY_TEST_BIN" XRAY_TEST_ASSETS="$XRAY_TEST_ASSETS" node "$tmpdir/probe.js" "$tmpdir/runtime.json" "$@" 2>"$tmpdir/probe.log"
 }
 
 # check <mode> <rules> <expected "name=real|fake" ...>
@@ -67,9 +80,9 @@ check() {
 	local mode="$1" rules="$2" answers="" item=""
 	shift 2
 	gen_rules "$mode" "$rules"
-	answers="$(probe "${@%%=*}")" || fail "probe failed for: $rules"
+	answers="$(probe "${@%%=*}")" || fail "probe failed for: $rules; core output: $(cat "$tmpdir/probe.log")"
 	for item in "$@"; do
-		grep -qx "${item%%=*} ${item#*=}" <<<"$answers" || fail "$mode, rules '$(tr '\n' ';' <<<"$rules")': expected ${item%%=*} ${item#*=}, got: $(tr '\n' ';' <<<"$answers")"
+		grep -qx "${item%%=*} ${item#*=}" <<<"$answers" || fail "$mode, rules '$(tr '\n' ';' <<<"$rules")': expected ${item%%=*} ${item#*=}, got: $(tr '\n' ';' <<<"$answers"); core output: $(cat "$tmpdir/probe.log")"
 	done
 }
 

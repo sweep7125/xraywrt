@@ -16,6 +16,7 @@
           "domain:example.com",
           "full:direct.example.org"
         ],
+        "finalQuery": true,
         "port": 5353,
         "skipFallback": true
       },
