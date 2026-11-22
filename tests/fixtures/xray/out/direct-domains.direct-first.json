@@ -117,7 +117,8 @@
         "destOverride": [
           "fakedns"
         ],
-        "enabled": true
+        "enabled": true,
+        "routeOnly": true
       },
       "streamSettings": {
         "sockopt": {
@@ -274,7 +275,19 @@
         "inboundTag": [
           "xraywrt-fakeip-direct"
         ],
-        "outboundTag": "xraywrt-direct"
+        "outboundTag": "direct"
+      },
+      {
+        "domain": [
+          "domain:example.com",
+          "full:direct.example.org"
+        ],
+        "inboundTag": [
+          "xraywrt-tproxy4",
+          "xraywrt-tproxy6"
+        ],
+        "outboundTag": "direct",
+        "ruleTag": "xraywrt-rule-1"
       },
       {
         "domain": [
@@ -282,7 +295,7 @@
           "full:direct.example.org"
         ],
         "outboundTag": "xraywrt-direct",
-        "ruleTag": "xraywrt-rule-1"
+        "ruleTag": "xraywrt-rule-1-service"
       }
     ]
   }

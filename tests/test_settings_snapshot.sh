@@ -45,7 +45,7 @@ for name in defaults full lists quoting; do
  if [ "${CAPTURE_SETTINGS_SNAPSHOTS:-0}" = 1 ]; then
   cp "$tmpdir/$name.actual" "$UCI_FIXTURE.snapshot"
  else
-  assert_true "$awk_impl awk: $name settings identical to pre-X6 snapshot" cmp -s "$UCI_FIXTURE.snapshot" "$tmpdir/$name.actual"
+  assert_true "$awk_impl awk: $name settings match the expected snapshot" cmp -s "$UCI_FIXTURE.snapshot" "$tmpdir/$name.actual"
   assert_eq 1 "$(grep -c '^show xraywrt$' "$UCI_CALLS" || true)" "$name one UCI show pass"
   assert_eq 0 "$(grep -c '^get xraywrt' "$UCI_CALLS" || true)" "$name no per-option UCI get"
  fi

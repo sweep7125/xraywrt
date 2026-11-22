@@ -172,7 +172,7 @@ mkdir "$WORK/logs" "$WORK/saved" || fatal 'refuse existing guest fixture state'
 for name in 'nft syntax' 'control reachable' 'client IPv6 rejected' 'local and IPv4 retained' \
 	'core and other ingress retained' 'NetBird synthetic' 'routes and DNS boundaries' 'local names' 'fake-IP direct devices' lifecycle \
 	'port forward and WAN service replies' 'IPv6 disabled' 'policy rule precedence' 'loopback TPROXY' \
-	'geodata download' 'geosite fake-IP' 'stale fake-IP' 'DNS query types' 'server bootstrap' \
+	'geodata download' 'geosite fake-IP' 'stale fake-IP' 'native DNS paths' 'DNS query types' 'server bootstrap' \
 	'balancer overrides' 'hot subscription TCP' 'routing strategy restart' 'zapret marks' 'guest zone' 'sticky stop' 'DNS path fail-open'; do
 	record "$name" 'NOT TESTED' 'not reached'
 done
@@ -301,6 +301,12 @@ uci set dhcp.m22host.ip=192.0.2.10
 uci set dhcp.m22static=domain
 uci set dhcp.m22static.name=static22.corp22
 uci set dhcp.m22static.ip=192.0.2.9
+uci set dhcp.m22staticproxy=domain
+uci set dhcp.m22staticproxy.name=proxy-first.corp22
+uci set dhcp.m22staticproxy.ip=192.0.2.9
+uci set dhcp.m22staticdirect=domain
+uci set dhcp.m22staticdirect.name=direct-first.corp22
+uci set dhcp.m22staticdirect.ip=192.0.2.9
 uci set dhcp.m22static6=domain
 uci set dhcp.m22static6.name=static22.corp22
 uci set dhcp.m22static6.ip=fd22:10::9
@@ -336,13 +342,16 @@ PIDS="$PIDS $!"
 # Without upstreams this dnsmasq REFUSES any type it has no record for; musl
 # then fails the whole lookup, so hosts-file names carry A and AAAA. Root keeps
 # the hosts file in the private work directory readable.
-printf '%s\n' '198.20.22.2 geo22.example.net node22.example.net' '2001:db8:ffff::2 geo22.example.net node22.example.net' >"$WORK/node/wan.hosts"
+printf '%s\n' '198.20.22.2 geo22.example.net node22.example.net' '2001:db8:ffff::2 geo22.example.net node22.example.net internal22.example.net' >"$WORK/node/wan.hosts"
 ip netns exec m22-w dnsmasq --keep-in-foreground --conf-file=/dev/null --no-resolv --no-hosts \
 	--bind-interfaces --interface=eth0 --log-queries --log-facility=- \
 	--address=/raw22.test/198.20.22.2 --address=/raw22.test/2001:db8:ffff::2 \
+	--address=/native22.example.net/198.20.22.2 --address=/native22.example.net/2606:4700:4700::1111 \
 	--address=/conditional22.test/198.20.22.2 --address=/primary22.example.net/198.20.22.22 \
 	--address=/fake22.example.net/198.20.22.2 --address=/public22.example.org/198.20.22.2 \
-	--txt-record=txt22.example.net,m22-txt --dns-rr=public22.example.org,65,000100 \
+	--txt-record=txt22.example.net,m22-txt --txt-record=fake22.example.net,m22-protected \
+	--dns-rr=public22.example.org,64,000100 --dns-rr=public22.example.org,65,000100 \
+	--dns-rr=raw22.example.net,64,000100 --dns-rr=raw22.example.net,65,000100 \
 	--user=root --addn-hosts="$WORK/node/wan.hosts" >"$WORK/logs/dns-wan.log" 2>&1 6>&- 7>&- 8>&- 9>&- &
 PIDS="$PIDS $!"
 # geosite.dat built here (GeoSiteList protobuf): list M22 = full:fake22.example.net.
@@ -404,6 +413,7 @@ profile() {
 	uci set xraywrt.settings.block_client_ipv6=0
 	uci -q delete xraywrt.settings.dns_raw_upstream || true
 	uci -q delete xraywrt.settings.dns_forward_other_types || true
+	uci -q delete xraywrt.settings.block_https_svcb || true
 	uci -q delete xraywrt.settings.provider_override || true
 	uci -q delete xraywrt.settings.source_network_interfaces || true
 	uci add_list xraywrt.settings.source_network_interfaces=m22c
@@ -414,6 +424,7 @@ profile() {
   "xraywrt": {"mode": "$mode", "block-client-ipv6": $flag},
   $geodata
   "dns": {
+    "hosts": {"internal22.example.net": "2001:db8:ffff::3"},
     "servers": [
       ${NODE_DNS:-}$fake
       {"address": "198.20.22.2", "domains": ["domain:primary22.example.net"], "skipFallback": true},
@@ -492,8 +503,7 @@ node_log_row() {
 	tail -n +"$(($(cat "$WORK/node.row-start") + 1))" "$WORK/logs/node.log"
 }
 
-# BusyBox nc has no UDP/timeout switches. nslookup supplies UDP; a tracked
-# watchdog bounds it, while nc carries a length-prefixed DNS packet for TCP.
+# A tracked watchdog bounds network fixture commands.
 bounded() {
 	local pid="" rc=0 i=""
 	# An asynchronous command gets /dev/null as stdin unless it is redirected explicitly.
@@ -537,7 +547,7 @@ dns_tcp_query() {
 		printf '\000'
 		case "$type" in
 		A) printf '\000\001' ;; AAAA) printf '\000\034' ;; PTR) printf '\000\014' ;;
-		TXT) printf '\000\020' ;; HTTPS) printf '\000\101' ;; *) return 1 ;;
+		TXT) printf '\000\020' ;; SVCB) printf '\000\100' ;; HTTPS) printf '\000\101' ;; *) return 1 ;;
 		esac
 		printf '\000\001'
 	} >"$WORK/query.bin"
@@ -545,11 +555,12 @@ dns_tcp_query() {
 	hi=$((size / 256)); lo=$((size % 256))
 	# shellcheck disable=SC2059 # octal escapes for the fixed 2-byte TCP DNS length prefix
 	{ printf "\\$(printf '%03o' "$hi")\\$(printf '%03o' "$lo")"; cat "$WORK/query.bin"; } >"$WORK/query.tcp"
-	# nc can wait for EOF after a valid reply; the watchdog status is not the DNS oracle.
+	# Keep stdin open after EOF so the TCP response is not lost; the watchdog is not the DNS oracle.
+	case "$server" in *:*) server="[$server]" ;; esac
 	if [ "$ns" = router ]; then
-		BOUNDED_STDIN="$WORK/query.tcp" bounded nc "$server" "$port" >"$WORK/reply.bin" || true
+		BOUNDED_STDIN="$WORK/query.tcp" bounded socat -T 3 -,ignoreeof "TCP:$server:$port" >"$WORK/reply.bin" || true
 	else
-		BOUNDED_STDIN="$WORK/query.tcp" bounded ip netns exec "m22-$ns" nc "$server" "$port" >"$WORK/reply.bin" || true
+		BOUNDED_STDIN="$WORK/query.tcp" bounded ip netns exec "m22-$ns" socat -T 3 -,ignoreeof "TCP:$server:$port" >"$WORK/reply.bin" || true
 	fi
 	hexdump -v -e '1/1 "%02x"' "$WORK/reply.bin" >"$WORK/logs/dns-tcp-last.hex"
 	cat "$WORK/logs/dns-tcp-last.hex"
@@ -926,7 +937,7 @@ check_local_names() {
 }
 
 check_fakeip_direct() {
-	local address="" direct_pid="" proxy_pid=""
+	local address="" direct_pid="" proxy_pid="" pair="" stale_pid=""
 	profile proxy-first fake-ip true 1
 	set_lists empty
 	uci add_list xraywrt.settings.source_network_interfaces=m22u
@@ -936,6 +947,7 @@ check_fakeip_direct() {
 	printf '02:00:00:22:00:02\n' >/tmp/xraywrt-policy-list.network-direct-src
 	/usr/bin/xraywrt apply-lists - - /tmp/xraywrt-policy-list.network-direct-src
 	cmp -s /tmp/xraywrt/config.json "$WORK/runtime-before-device-list"
+	jq -e '[.inbounds[] | select(.tag == "xraywrt-tproxy4" or .tag == "xraywrt-fakeip-direct") | .sniffing | .enabled == true and .routeOnly == true and .destOverride == ["fakedns"]] == [true, true]' /tmp/xraywrt/config.json
 	dns_udp 192.0.2.1 fake22.example.net A fake-ip
 	address="$(awk '/^Name:/ {answer=1} answer && /^Address/ {for(i=1;i<=NF;i++) if($i ~ /^198[.]1[89][.]/) {print $i;exit}}' "$WORK/logs/dns-last.log")"
 	[ -n "$address" ]
@@ -956,6 +968,54 @@ check_fakeip_direct() {
 	# Real IPv4 and IPv6 stay outside the core, even with the IPv6 flag on.
 	http c 198.20.22.2 | grep xraywrt-network-fixture
 	http c '[2001:db8:ffff::2]' | grep xraywrt-network-fixture
+	# The direct device wins over both a destination and a device capture selector.
+	for pair in direct-first:fake-ip direct-first:redir-host proxy-first:fake-ip proxy-first:redir-host; do
+		profile "${pair%:*}" "${pair#*:}" true 1
+		uci add_list xraywrt.settings.source_network_interfaces=m22u
+		uci commit xraywrt
+		/usr/bin/xraywrt reload
+		printf '198.20.22.2 core\n' > /tmp/xraywrt-policy-list.network-rules
+		printf '02:00:00:22:00:02\n' > /tmp/xraywrt-policy-list.network-src
+		cp /tmp/xraywrt-policy-list.network-src /tmp/xraywrt-policy-list.network-direct-src
+		/usr/bin/xraywrt apply-lists /tmp/xraywrt-policy-list.network-rules /tmp/xraywrt-policy-list.network-src /tmp/xraywrt-policy-list.network-direct-src
+		http c 198.20.22.2 8081 /cgi-bin/peer >"$WORK/logs/conflict-direct.http"
+		peer_is "$WORK/logs/conflict-direct.http" 192.0.2.2
+		http u 198.20.22.2 8081 /cgi-bin/peer >"$WORK/logs/conflict-other.http"
+		peer_is "$WORK/logs/conflict-other.http" 198.20.22.2
+		if [ "${pair%:*}" = direct-first ]; then (reject_fresh "conflict-${pair#*:}"); fi
+		if [ "${pair#*:}" = fake-ip ]; then
+			dns_udp 192.0.2.1 fake22.example.net A fake-ip
+			address="$(awk '/^Name:/ {answer=1} answer && /^Address/ {for(i=1;i<=NF;i++) if($i ~ /^198[.]1[89][.]/) {print $i;exit}}' "$WORK/logs/dns-last.log")"
+			[ -n "$address" ]
+			ip netns exec m22-c curl --noproxy '*' -fsS --max-time 20 --resolve "fake22.example.net:8080:$address" http://fake22.example.net:8080/cgi-bin/hold >"$WORK/logs/conflict-fake.http"
+			peer_is "$WORK/logs/conflict-fake.http" 198.20.22.1 2001:db8:ffff::1
+			profile "${pair%:*}" redir-host true 1
+			printf '198.20.22.2 core\n' > /tmp/xraywrt-policy-list.network-rules
+			printf '02:00:00:22:00:02\n' > /tmp/xraywrt-policy-list.network-src
+			cp /tmp/xraywrt-policy-list.network-src /tmp/xraywrt-policy-list.network-direct-src
+			/usr/bin/xraywrt apply-lists /tmp/xraywrt-policy-list.network-rules /tmp/xraywrt-policy-list.network-src /tmp/xraywrt-policy-list.network-direct-src
+			(
+				label="conflict-stale-${pair%:*}"
+				lan_pid=""; stale_pid=""
+				ip -4 route add "$address/32" via 198.20.22.2 dev m22w
+				trap 'kill $lan_pid $stale_pid 2>/dev/null || true; wait $lan_pid $stale_pid 2>/dev/null || true; ip -4 route del "$address/32" via 198.20.22.2 dev m22w' EXIT
+				ip -4 route get "$address" | grep -q 'dev m22w'
+				tcpdump --immediate-mode -ni m22c -U -w "$WORK/logs/$label.lan.pcap" "host $address and tcp port 8080" >"$WORK/logs/$label.lan.capture" 2>&1 6>&- 7>&- 8>&- 9>&- &
+				lan_pid=$!
+				tcpdump --immediate-mode -ni m22w -U -w "$WORK/logs/$label.wan.pcap" "host $address and tcp port 8080" >"$WORK/logs/$label.wan.capture" 2>&1 6>&- 7>&- 8>&- 9>&- &
+				stale_pid=$!
+				sleep 2
+				if ip netns exec m22-c curl --noproxy '*' -fsS --max-time 5 "http://$address:8080/"; then fatal 'stale FakeIP unexpectedly succeeded'; fi
+				sleep 1
+				kill "$lan_pid" "$stale_pid"; wait "$lan_pid" 2>/dev/null || true; wait "$stale_pid" 2>/dev/null || true
+				lan_pid=""; stale_pid=""
+				tcpdump -nn -r "$WORK/logs/$label.lan.pcap" >"$WORK/logs/$label.lan.decoded" 2>&1
+				tcpdump -nn -r "$WORK/logs/$label.wan.pcap" >"$WORK/logs/$label.wan.decoded" 2>&1
+				grep -E 'Flags \[S\]' "$WORK/logs/$label.lan.decoded"
+				absent grep -E 'Flags \[S\]' "$WORK/logs/$label.wan.decoded"
+			)
+		fi
+	done
 	snap fake-direct
 }
 
@@ -1390,6 +1450,10 @@ check_stale_fakeip() {
 	local address="" old="" pid="" rc=0
 	profile direct-first geosite false 0
 	set_lists empty
+	/usr/bin/xraywrt read-config | jq -r .content | jq '.outbounds += [{"tag":"BlOcK","protocol":"blackhole","settings":{"response":{"type":"http"}}}]' > /tmp/xraywrt-config.network-fixture
+	/usr/bin/xraywrt save-config /tmp/xraywrt-config.network-fixture
+	/usr/bin/xraywrt reload
+	jq -e '.routing.rules[2].outboundTag == "BlOcK"' /tmp/xraywrt/config.json
 	dns_udp 192.0.2.1 fake22.example.net A fake-ip
 	address="$(awk '/^Name:/ {answer=1} answer && /^Address/ {for(i=1;i<=NF;i++) if($i ~ /^198[.]1[89][.]/) {print $i;exit}}' "$WORK/logs/dns-last.log")"
 	[ -n "$address" ]
@@ -1404,14 +1468,14 @@ check_stale_fakeip() {
 	pid=$!
 	trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
 	sleep 2
-	ip netns exec m22-c curl --noproxy '*' -fsS --max-time 10 "http://$address:8080/" || rc=$?
+	ip netns exec m22-c curl --noproxy '*' -sS --max-time 10 -o "$WORK/logs/stale.response" -w '%{http_code}' "http://$address:8080/" >"$WORK/logs/stale.status" || rc=$?
 	sleep 1
 	kill "$pid"; wait "$pid" 2>/dev/null || true
 	trap - EXIT
 	tcpdump -nn -r "$WORK/logs/stale.pcap" >"$WORK/logs/stale.decoded" 2>&1
-	# xraywrt-block: the core accepts the TPROXY connection and closes it empty
-	# (curl 52, not refused/timeout), and nothing but the client opens a TCP connection.
-	[ "$rc" = 52 ]
+	# The provider blackhole's HTTP response proves the exact mixed-case tag was reached.
+	[ "$rc" = 0 ]
+	[ "$(cat "$WORK/logs/stale.status")" = 403 ]
 	grep -Eq "IP 192[.]0[.]2[.]2[.][0-9]+ > $(printf '%s' "$address" | sed 's/[.]/[.]/g')[.]8080: Flags \[S\]," "$WORK/logs/stale.decoded"
 	foreign_syns "$WORK/logs/stale.decoded" 192.0.2.2 >"$WORK/logs/stale.foreign-syns"
 	[ ! -s "$WORK/logs/stale.foreign-syns" ]
@@ -1422,6 +1486,92 @@ check_stale_fakeip() {
 	ip netns exec m22-c curl --noproxy '*' -fsS --max-time 10 --resolve "fake22.example.net:8080:$address" http://fake22.example.net:8080/ | grep xraywrt-network-fixture
 }
 
+# Native provider DNS interception and the separate LAN dnsmasq path.
+check_native_dns_paths() {
+	local mode="" transport="" type="" name="" pid="" before="" original_before="" original_pid=""
+	wan_dns 198.20.22.2
+	# A different reachable original resolver proves interception did not merely bypass.
+	ip netns exec m22-w ip addr add 198.20.22.3/24 dev eth0
+	ip netns exec m22-w dnsmasq --keep-in-foreground --conf-file=/dev/null --no-resolv --no-hosts \
+		--bind-interfaces --listen-address=198.20.22.3 --log-queries --log-facility=- \
+		--address=/native22.example.net/203.0.113.77 --address=/native22.example.net/2001:db8::77 \
+		--user=root >"$WORK/logs/dns-original.log" 2>&1 6>&- 7>&- 8>&- 9>&- &
+	original_pid=$!
+	trap 'kill "$original_pid" 2>/dev/null || true; wait "$original_pid" 2>/dev/null || true' EXIT
+	profile direct-first fake-ip false 0
+	set_lists empty
+	dns_udp 198.20.22.3 control.native22.example.net A 203.0.113.77
+	original_before="$(grep -c 'query\[' "$WORK/logs/dns-original.log")"
+	for mode in proxy-first direct-first; do
+		profile "$mode" fake-ip false 0
+		set_lists empty
+		printf '198.20.22.3;53 core\n' > /tmp/xraywrt-policy-list.network-rules
+		/usr/bin/xraywrt apply-lists /tmp/xraywrt-policy-list.network-rules - -
+		/usr/bin/xraywrt read-config | jq -r .content | jq '.dns.servers = [{"address":"fakedns","domains":["full:fake22.example.net","domain:fake22.example.net"],"skipFallback":true}] | .outbounds += [{"tag":"provider-dns","protocol":"dns"}] | .routing.rules = [{"inboundTag":["xraywrt-tproxy4"],"port":"53","network":"tcp,udp","outboundTag":"provider-dns"}] + .routing.rules' > /tmp/xraywrt-config.network-fixture
+		/usr/bin/xraywrt save-config /tmp/xraywrt-config.network-fixture
+		/usr/bin/xraywrt reload
+		jq -e '[.routing.rules[] | select(.outboundTag == "provider-dns")] | length == 1' /tmp/xraywrt/config.json
+		tcpdump -ni any -U -w "$WORK/logs/native-$mode.pcap" 'port 53 or port 7874' >"$WORK/logs/native-$mode.capture" 2>&1 6>&- 7>&- 8>&- 9>&- &
+		pid=$!
+		trap 'kill "$pid" "$original_pid" 2>/dev/null || true; wait "$pid" "$original_pid" 2>/dev/null || true' EXIT
+		sleep 2
+		for transport in udp tcp; do
+			for type in A AAAA; do
+				name="$mode-$transport-$(printf %s "$type" | tr '[:upper:]' '[:lower:]').native22.example.net"
+				before="$(grep -c "query\[$type\] $name from 198.20.22.1" "$WORK/logs/dns-wan.log" || true)"
+				if [ "$transport" = udp ]; then
+					case "$type" in A) dns_udp 198.20.22.3 "$name" "$type" 198.20.22.2 ;; AAAA) dns_udp 198.20.22.3 "$name" "$type" 2606:4700:4700::1111 ;; esac
+				else
+					case "$type" in A) dns_tcp 198.20.22.3 "$name" "$type" c6141602 ;; AAAA) dns_tcp 198.20.22.3 "$name" "$type" 26064700470000000000000000001111 ;; esac
+				fi
+				[ "$(grep -c "query\[$type\] $name from 198.20.22.1" "$WORK/logs/dns-wan.log" || true)" -gt "$before" ]
+			done
+		done
+		kill "$pid"; wait "$pid" 2>/dev/null || true
+		trap 'kill "$original_pid" 2>/dev/null || true; wait "$original_pid" 2>/dev/null || true' EXIT
+		tcpdump -nn -r "$WORK/logs/native-$mode.pcap" >"$WORK/logs/native-$mode.decoded" 2>&1
+		tcpdump -nn -r "$WORK/logs/native-$mode.pcap" 'port 7874' >"$WORK/logs/native-$mode.core-packets" 2>"$WORK/logs/native-$mode.core-capture-read"
+		[ ! -s "$WORK/logs/native-$mode.core-packets" ] || fatal "$mode native DNS reached core port"
+		[ "$(grep -c 'query\[' "$WORK/logs/dns-original.log")" = "$original_before" ]
+		for transport in udp tcp; do
+			for type in A AAAA; do
+				name="$mode-$transport-$(printf %s "$type" | tr '[:upper:]' '[:lower:]').native22.example.net"
+				[ "$(grep -cE "m22w  Out IP 198[.]20[.]22[.]1[.][0-9]+ > 198[.]20[.]22[.]2[.]53: .* ${type}[?] ${name}[.] " "$WORK/logs/native-$mode.decoded")" = 1 ]
+			done
+		done
+		# Separate names and captures prevent cached or earlier queries hiding a leak.
+		/etc/init.d/dnsmasq restart
+		before="$(wc -l <"$WORK/logs/dns-wan.log")"
+		tcpdump -ni any -U -w "$WORK/logs/lan-dns-$mode.pcap" 'port 53 or port 7874' >"$WORK/logs/lan-dns-$mode.capture" 2>&1 6>&- 7>&- 8>&- 9>&- &
+		pid=$!
+		trap 'kill "$pid" "$original_pid" 2>/dev/null || true; wait "$pid" "$original_pid" 2>/dev/null || true' EXIT
+		sleep 2
+		dns_udp 192.0.2.1 "$mode.corp22" A 192.0.2.9
+		dns_tcp 192.0.2.1 "$mode.corp22" A c0000209
+		dns_udp 192.0.2.1 "$mode.fake22.example.net" A fake-ip
+		dns_tcp_query c 192.0.2.1 53 "$mode.fake22.example.net" A
+		[ "$(dns_tcp_rcode)" = 0 ] || fatal "$mode FakeDNS TCP rcode"
+		[ "$(dns_tcp_answers)" != 0000 ] || fatal "$mode FakeDNS TCP empty answer"
+		grep -Eq 'c612|c613' "$WORK/logs/dns-tcp-last.hex" || fatal "$mode FakeDNS TCP missing fake IP"
+		dns_udp 192.0.2.1 "lan-$mode-udp.native22.example.net" A 198.20.22.2
+		dns_tcp 192.0.2.1 "lan-$mode-tcp.native22.example.net" AAAA 26064700470000000000000000001111
+		kill "$pid"; wait "$pid" 2>/dev/null || true
+		trap 'kill "$original_pid" 2>/dev/null || true; wait "$original_pid" 2>/dev/null || true' EXIT
+		tail -n "+$((before + 1))" "$WORK/logs/dns-wan.log" >"$WORK/logs/lan-dns-$mode.wan.log"
+		grep -q "query\[A\] lan-$mode-udp.native22.example.net from 198.20.22.1" "$WORK/logs/lan-dns-$mode.wan.log" || fatal "$mode LAN UDP missing WAN query"
+		grep -q "query\[AAAA\] lan-$mode-tcp.native22.example.net from 198.20.22.1" "$WORK/logs/lan-dns-$mode.wan.log" || fatal "$mode LAN TCP missing WAN query"
+		if grep -Eq "query\[[^]]+\] ($mode.corp22|$mode.fake22.example.net)( |$)" "$WORK/logs/lan-dns-$mode.wan.log"; then fatal "$mode local or fake DNS leaked to WAN"; fi
+		tcpdump -nn -T domain -r "$WORK/logs/lan-dns-$mode.pcap" 'port 7874' >"$WORK/logs/lan-dns-$mode.core.decoded" 2>&1
+		[ "$(dns_asked "$WORK/logs/lan-dns-$mode.core.decoded" 7874 A "$mode.fake22.example.net")" -gt 0 ] || fatal "$mode FakeDNS UDP did not reach core"
+		tcpdump -nn -T domain -r "$WORK/logs/lan-dns-$mode.pcap" 'tcp dst port 7874' >"$WORK/logs/lan-dns-$mode.core-tcp.decoded" 2>&1
+		[ "$(dns_asked "$WORK/logs/lan-dns-$mode.core-tcp.decoded" 7874 AAAA "lan-$mode-tcp.native22.example.net")" -gt 0 ] || fatal "$mode LAN TCP query was not decoded at core"
+		[ "$(dns_asked "$WORK/logs/lan-dns-$mode.core.decoded" 7874 A "$mode.corp22")" = 0 ] || fatal "$mode local DNS reached core"
+	done
+	kill "$original_pid"; wait "$original_pid" 2>/dev/null || true
+	trap - EXIT
+	wan_dns dhcp
+}
+
 # Spec 7.5: HTTPS/SVCB answered empty; other types empty by default, raw to
 # dns_raw_upstream only with dns_forward_other_types (direct-first).
 check_dns_types() {
@@ -1430,16 +1580,20 @@ check_dns_types() {
 	set_lists empty
 	# Control: the WAN resolver has an HTTPS record; through the router it is empty.
 	dns_tcp_query c 198.20.22.2 53 public22.example.org HTTPS
-	[ "$(dns_tcp_rcode)" = 0 ] && [ "$(dns_tcp_answers)" = 0001 ]
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0001 ]
 	dns_tcp_query c 192.0.2.1 53 public22.example.org HTTPS
-	[ "$(dns_tcp_rcode)" = 0 ] && [ "$(dns_tcp_answers)" = 0000 ]
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0000 ]
 	dns_tcp_query router 127.0.0.1 7874 public22.example.org HTTPS
-	[ "$(dns_tcp_rcode)" = 0 ] && [ "$(dns_tcp_answers)" = 0000 ]
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0000 ]
 	# Default: other types get an empty answer and never reach the WAN resolver.
 	jq -e '.inbounds[] | select(.tag == "xraywrt-dns-in") | .settings | has("rewriteAddress") | not' /tmp/xraywrt/config.json
 	before="$(grep -c 'query\[TXT\] txt22.example.net' "$WORK/logs/dns-wan.log" || true)"
 	dns_tcp_query c 192.0.2.1 53 txt22.example.net TXT
-	[ "$(dns_tcp_rcode)" = 0 ] && [ "$(dns_tcp_answers)" = 0000 ]
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0000 ]
 	[ "$(grep -c 'query\[TXT\] txt22.example.net' "$WORK/logs/dns-wan.log" || true)" = "$before" ]
 	# Forward: raw to dns_raw_upstream; whitelist domains still get an empty answer.
 	uci set xraywrt.settings.dns_raw_upstream=198.20.22.2
@@ -1449,11 +1603,44 @@ check_dns_types() {
 	jq -e '.inbounds[] | select(.tag == "xraywrt-dns-in") | .settings.rewriteAddress == "198.20.22.2"' /tmp/xraywrt/config.json
 	before="$(grep -c 'query\[TXT\] txt22.example.net from 198.20.22.1' "$WORK/logs/dns-wan.log" || true)"
 	dns_tcp_query c 192.0.2.1 53 txt22.example.net TXT
-	[ "$(dns_tcp_rcode)" = 0 ] && [ "$(dns_tcp_answers)" = 0001 ]
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0001 ]
 	grep -q 6d32322d747874 "$WORK/logs/dns-tcp-last.hex"
 	[ "$(grep -c 'query\[TXT\] txt22.example.net from 198.20.22.1' "$WORK/logs/dns-wan.log")" -gt "$before" ]
 	dns_tcp_query router 127.0.0.1 7874 fake22.example.net TXT
-	[ "$(dns_tcp_rcode)" = 0 ] && [ "$(dns_tcp_answers)" = 0000 ]
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0000 ]
+	# Both raw record types exist upstream; the opt-in blocks only those types.
+	for type in SVCB HTTPS; do
+		dns_tcp_query router 127.0.0.1 7874 raw22.example.net "$type"
+		[ "$(dns_tcp_rcode)" = 0 ]
+		[ "$(dns_tcp_answers)" = 0001 ]
+	done
+	uci set xraywrt.settings.block_https_svcb=1
+	uci commit xraywrt
+	/usr/bin/xraywrt reload
+	for type in SVCB HTTPS; do
+		dns_tcp_query router 127.0.0.1 7874 raw22.example.net "$type"
+		[ "$(dns_tcp_rcode)" = 0 ]
+		[ "$(dns_tcp_answers)" = 0000 ]
+	done
+	dns_tcp_query router 127.0.0.1 7874 txt22.example.net TXT
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0001 ]
+	grep -q 6d32322d747874 "$WORK/logs/dns-tcp-last.hex"
+	dns_tcp_query router 127.0.0.1 7874 fake22.example.net TXT
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0000 ]
+	dns_udp 192.0.2.1 fake22.example.net A fake-ip
+	dns_tcp_query c 198.20.22.2 53 internal22.example.net AAAA
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0001 ]
+	grep -q 20010db8ffff00000000000000000002 "$WORK/logs/dns-tcp-last.hex"
+	dns_tcp_query router 127.0.0.1 7874 internal22.example.net AAAA
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0001 ]
+	grep -q 20010db8ffff00000000000000000003 "$WORK/logs/dns-tcp-last.hex"
+	uci -q delete xraywrt.settings.block_https_svcb
 	uci -q delete xraywrt.settings.dns_raw_upstream
 	uci -q delete xraywrt.settings.dns_forward_other_types
 	uci commit xraywrt
@@ -1782,7 +1969,7 @@ row 'core and other ingress retained' 'IPv4 via IPv6 SOCKS5 node, router output 
 row 'NetBird synthetic' '2 interfaces/bases, 2 proxy settings, packet/ct original/reply paths, start orders/reconnect/fw4' check_netbird
 row 'routes and DNS boundaries' 'occupied slots preserved, live prefix updates and DNS ownership/conditional boundaries' check_routes_dns
 row 'local names' 'fixture host and router names resolve to LAN addresses over UDP/TCP, with local reverse answers in fake-ip/redir-host' check_local_names
-row 'fake-IP direct devices' 'listed MAC fake-IP uses xraywrt-direct; unlisted device uses the SOCKS node; real addresses bypass' check_fakeip_direct
+row 'fake-IP direct devices' 'direct devices beat conflicting selectors in both modes and DNS styles; fake-IP uses direct listener and stale IP does not reach WAN' check_fakeip_direct
 row lifecycle 'provider/override, no-op, failed transaction, stop/watchdog/restart fresh flows' check_lifecycle
 row 'port forward and WAN service replies' 'DNAT forward and router WAN service, TCP+UDP, proxy-first and direct-first: replies unmarked, rule-less control breaks' check_forward_replies
 row 'IPv6 disabled' 'disabled stack starts with IPv4 TPROXY only, no IPv6 policy changes; re-enable restores IPv6 interception' check_ipv6_disabled
@@ -1790,8 +1977,9 @@ row 'policy rule precedence' 'priority 50-99 precedes NetBird 105/110 and mwan3 
 row 'loopback TPROXY' 'TCP and UDP over IPv4 and IPv6 reach the core on 127.0.0.1/::1 only and leave through the SOCKS node' check_loopback_tproxy
 row 'geodata download' 'missing geosite.dat fetched from the asset https url via WAN DNS bypass before the config is used' check_geodata_download
 row 'geosite fake-IP' 'direct-first: geosite domain gets fake-IP and the proxy, others real IP past Xray; direct device fake-IP via xraywrt-direct' check_geosite_fakeip
-row 'stale fake-IP' 'fake-IP without a record after a core restart is refused (xraywrt-block); a fresh DNS answer works' check_stale_fakeip
-row 'DNS query types' 'HTTPS RR empty; TXT empty by default; raw to dns_raw_upstream with dns_forward_other_types, empty for whitelist domains' check_dns_types
+row 'stale fake-IP' 'stale fake-IP reaches mixed-case provider blackhole without WAN egress; a fresh DNS answer works' check_stale_fakeip
+row 'native DNS paths' 'native external TCP/UDP and LAN dnsmasq use controlled DNS without hijack' check_native_dns_paths
+row 'DNS query types' 'SVCB/HTTPS opt-in blocks positive raw controls; TXT forwards; A/AAAA use internal DNS; whitelist remains protected' check_dns_types
 row 'server bootstrap' 'proxy server by name resolves via dnsmasq bypass to WAN DNS without a loop, AsIs and ForceIPv4' check_server_bootstrap
 row 'balancer overrides' 'two balancers listed; live pin reaches selected proxy, survives restart, empty target restores auto' check_balancer_overrides
 row 'hot subscription TCP' 'subscription changes only hot-idle; proxy TCP delivers before/after bytes without reconnect or core restart' check_hot_subscription

@@ -103,6 +103,8 @@ FW4_INPUT_INCLUDE="/usr/share/nftables.d/chain-pre/input/30-xraywrt.nft"
 NFT_TABLE_NAME="xraywrt"
 NFT_INTERCEPT_MARK="0x08000000"
 NFT_DIRECT_MARK="0x04000000"
+# Conntrack mark, separate from packet marks; reserved for Discord Voice flows.
+NFT_DISCORD_VOICE_CT_MARK="0x01000000"
 ZAPRET_DESYNC_MARK="0x40000000"
 ZAPRET_DESYNC_MARK_POSTNAT="0x20000000"
 NETBIRD_DEFAULT_MARK="113920"

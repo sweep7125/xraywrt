@@ -45,7 +45,8 @@
         "destOverride": [
           "fakedns"
         ],
-        "enabled": true
+        "enabled": true,
+        "routeOnly": true
       },
       "streamSettings": {
         "sockopt": {
@@ -66,7 +67,8 @@
         "destOverride": [
           "fakedns"
         ],
-        "enabled": true
+        "enabled": true,
+        "routeOnly": true
       },
       "streamSettings": {
         "sockopt": {
@@ -87,7 +89,8 @@
         "destOverride": [
           "fakedns"
         ],
-        "enabled": true
+        "enabled": true,
+        "routeOnly": true
       },
       "streamSettings": {
         "sockopt": {
@@ -233,10 +236,6 @@
       "tag": "xraywrt-direct"
     },
     {
-      "protocol": "blackhole",
-      "tag": "xraywrt-block"
-    },
-    {
       "protocol": "dns",
       "settings": {
         "rules": [
@@ -271,7 +270,8 @@
           "xraywrt-dns-internal"
         ],
         "ip": [
-          "127.0.0.1"
+          "127.0.0.1",
+          "192.0.2.53"
         ],
         "outboundTag": "xraywrt-direct",
         "port": 53
@@ -280,13 +280,13 @@
         "ip": [
           "198.18.0.0/15"
         ],
-        "outboundTag": "xraywrt-block"
+        "outboundTag": "block"
       },
       {
         "inboundTag": [
           "xraywrt-fakeip-direct"
         ],
-        "outboundTag": "xraywrt-direct"
+        "outboundTag": "direct"
       },
       {
         "ip": [

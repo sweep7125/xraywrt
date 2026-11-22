@@ -41,8 +41,12 @@ example.org core
 203.0.113.0/24 my-server
 ```
 
-`direct` bypasses the VPN, `core` lets the configuration choose, and a server or
-balancer tag selects that target. Available tags appear under the list. The first
+IP and subnet `direct` rules bypass the core for real-IP traffic, regardless of DNS mode.
+Intercepted client traffic matching a site `direct` rule can be handled by Xray
+and use the provider's unique `DIRECT` outbound when available. That outbound may
+itself chain through a proxy, including for Fake-IP.
+Otherwise XrayWRT uses its own direct outbound.
+`core` lets the configuration choose, and a server or balancer tag selects that target. Available tags appear under the list. The first
 matching emitted Xray site route wins. An unqualified site `core` rule does not
 stop later overlapping rules with different site matchers; avoid that overlap
 when the provider should decide. Bare address lists keep direct bypasses ahead of
@@ -66,12 +70,14 @@ skipped if its explicit protocol conflicts with the URL's protocol.
 
 Device lists accept IP or MAC addresses. A changing private Wi-Fi MAC may stop
 matching; keep it fixed for this network. MAC matching requires the same local
-network segment. IPv4 entries do not cover IPv6.
+network segment. IPv4 entries do not cover IPv6. Direct devices bypass the core for real-IP traffic regardless of DNS mode.
+Their Fake-IP traffic uses the selected `DIRECT` outbound.
 
 ## DNS
 
-XrayWRT redirects ordinary client DNS; encrypted DNS (DoH/DoT) can bypass it.
-Fake-IP uses IPv4 and mappings are lost when the core restarts. Other query types
+Router DNS redirection is off by default and can be enabled in **Advanced → DNS**.
+Clients using the router as their DNS server still use its DNS path; encrypted DNS
+(DoH/DoT) can bypass redirection. Fake-IP uses IPv4 and mappings are lost when the core restarts. Other query types
 such as TXT, SRV and MX receive empty answers by default. Under **Advanced → DNS**
 you can enable direct forwarding in direct-first mode, or VPN forwarding.
 VPN forwarding requires an explicit DNS server IP and a suitable outbound tag.
@@ -144,3 +150,9 @@ Run `XRAYWRT_ACTION=remove sh install.sh`, or use `apk del` for the installed
 stops the service and clears its network policy. Configuration, lists and UCI
 settings remain for reinstall. `xraywrt uninstall` performs cleanup but does not
 remove the packages.
+
+### Discord Voice
+
+Advanced → Routing offers Discord Voice, off by default. Providers can set the boolean `xraywrt.discord-voice`; each subscription can follow the provider or override it. Proxy-first ignores the request without changing the saved preference. In direct-first mode it sends recognized IPv4 discovery flows from configured client interfaces to the existing Xray ingress. Existing device and address decisions still apply; Xray chooses the outbound. The signature is heuristic and does not identify every Discord flow. The feature requires conntrack accounting (`net.netfilter.nf_conntrack_acct=1`); if unavailable, the normal policy remains active and the detector is skipped. Enable accounting using your system configuration, then reload XrayWRT.
+
+The detector uses conntrack mark bit `0x01000000`, preserving other bits. XrayWRT has no other conntrack mark owner; packet mark values are separate, but third-party firewall, QoS or VPN rules can copy marks between namespaces or reuse this bit. Enable it only when XrayWRT has exclusive ownership of that conntrack bit on a known supported stack. Arbitrary third-party use of the same bit is unsupported. Flow offload can bypass packet inspection and is not certified. Turning the option off does not clear existing conntrack marks; an existing marked flow can resume detection when re-enabled.

@@ -33,11 +33,11 @@ uci() {
 }
 
 migrate
-assert_eq '1:1:0:1:1' "$(uci_get dns_hijack):$(uci_get disable_quic):$(uci_get netbird_proxy):$(uci_get bypass_ntp):$(uci_get bypass_subscription_dns)" 'flags written when empty'
+assert_eq '0:0:0:0:0' "$(uci_get dns_hijack):$(uci_get disable_quic):$(uci_get netbird_proxy):$(uci_get bypass_ntp):$(uci_get bypass_subscription_dns)" 'flags written when empty'
 assert_eq 0 "$(uci_get lists_interval)" 'lists_interval empty becomes 0'
 assert_eq warning "$(uci_get core_log_level)" 'core_log_level empty becomes warning'
 assert_eq '0 5 * * *' "$(uci_get geodata_cron)" 'geodata_cron empty filled'
-assert_eq '0:proxy-first' "$(uci_get dns_forward_other_types):$(uci_get mode)" 'new options filled'
+assert_eq '0:proxy-first:0' "$(uci_get dns_forward_other_types):$(uci_get mode):$(uci_get block_https_svcb)" 'new options filled'
 assert_eq '' "$(uci_get dns_raw_upstream)" 'DNS options stay empty: no public resolvers'
 assert_eq commit "$(cat "$tmpdir/commit.calls")" 'migrate commits retained defaults'
 assert_eq generated "$(cat "$tmpdir/generated.calls")" 'migrate ensures generated settings'
@@ -51,6 +51,7 @@ fake_uci_set xraywrt.settings.bypass_subscription_dns 0
 fake_uci_set xraywrt.settings.lists_interval 24
 fake_uci_set xraywrt.settings.core_log_level debug
 fake_uci_set xraywrt.settings.geodata_cron '15 6 * * 1-5'
+fake_uci_set xraywrt.settings.block_https_svcb 1
 before="$(cat "$FAKE_UCI_DB")"
 migrate
 assert_eq "$before" "$(cat "$FAKE_UCI_DB")" 'existing Traffic flags and lists_interval kept'
@@ -100,6 +101,10 @@ migrate
 assert_false 'dns_refuse_other_types removed' uci -q get xraywrt.settings.dns_refuse_other_types
 assert_false 'dns_block_https_rr removed' uci -q get xraywrt.settings.dns_block_https_rr
 assert_eq 0 "$(uci_get dns_forward_other_types)" 'dns_forward_other_types stays off'
+assert_eq 1 "$(uci_get block_https_svcb)" 'retired option does not overwrite existing opt-in'
+uci -q delete xraywrt.settings.block_https_svcb
+migrate
+assert_eq 0 "$(uci_get block_https_svcb)" 'retired option does not enable new opt-in'
 pass 'dns_refuse_other_types removed'
 
 # B3 / spec 16: empty list needs no placeholder; existing overrides survive upgrades.
@@ -168,6 +173,10 @@ uci -q set xraywrt.s1=subscription
 uci -q set xraywrt.s1.dst_list_source=own
 subscription_ids() { echo s1; }
 migrate
+assert_eq 0 "$(uci -q get xraywrt.s1.block_https_svcb)" 'parked subscription gets disabled opt-in'
+uci -q set xraywrt.s1.block_https_svcb=1
+migrate
+assert_eq 1 "$(uci -q get xraywrt.s1.block_https_svcb)" 'parked subscription opt-in preserved'
 assert_eq $'old.example direct\n3.3.3.3 core\nkept.example core' "$(cat "$XRAY_SUBS_DIR/s1/lists/rules.txt")" 'parked subscription migrated, its own rules kept'
 assert_false 'parked old file removed' test -e "$XRAY_SUBS_DIR/s1/lists/direct-domains.txt"
 assert_eq '' "$(uci -q get xraywrt.s1.dst_list_source || true)" 'parked source option removed'

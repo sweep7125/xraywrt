@@ -14,6 +14,8 @@ xray_params_json() {
 		--arg mode "${UCI_MODE:-proxy-first}" \
 		--argjson mode_override "$([ "${MODE_OVERRIDE:-0}" = 1 ] && echo true || echo false)" \
 		--argjson dns_forward_override "$([ "${DNS_FORWARD_OVERRIDE:-0}" = 1 ] && echo true || echo false)" \
+		--argjson block_https_svcb_override "$([ "${BLOCK_HTTPS_SVCB_OVERRIDE:-0}" = 1 ] && echo true || echo false)" \
+		--argjson block_https_svcb "${BLOCK_HTTPS_SVCB:-0}" \
 		--arg profile "${PROFILE_NAME:-}" \
 		--argjson from_subscription "$([ -n "${SUBSCRIPTION_URL:-}${SUBSCRIPTION_INSTALLING:-}" ] && echo true || echo false)" \
 		--argjson geodata_asset "${GEODATA_ASSETS_JSON:-[]}" \

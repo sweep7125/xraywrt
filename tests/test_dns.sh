@@ -79,6 +79,7 @@ assert_eq "9.9.9.9" "$(dns_custom_servers | sed 's/^[[:space:]]*//; s/[[:space:]
 pass "custom servers detected"
 
 fake_uci_set system.ntp.server 'good.ntp.org bad/host evil#x'
+BYPASS_NTP=1
 BYPASS_SUBSCRIPTION_DNS=0
 # shellcheck disable=SC2086 # a fixed space-separated host list
 assert_eq "good.ntp.org" "$(dns_bypass_hosts | grep -vxF "$(printf '%s\n' $CORE_RELEASE_HOSTS)")" "only plain host names reach dnsmasq"

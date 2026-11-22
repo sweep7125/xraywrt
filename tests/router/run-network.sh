@@ -15,7 +15,7 @@ result=1
 ROWS=('nft syntax' 'control reachable' 'client IPv6 rejected' 'local and IPv4 retained'
   'core and other ingress retained' 'NetBird synthetic' 'routes and DNS boundaries' 'local names' 'fake-IP direct devices' 'lifecycle'
   'port forward and WAN service replies' 'IPv6 disabled' 'policy rule precedence' 'loopback TPROXY'
-  'geodata download' 'geosite fake-IP' 'stale fake-IP' 'DNS query types' 'server bootstrap'
+  'geodata download' 'geosite fake-IP' 'stale fake-IP' 'native DNS paths' 'DNS query types' 'server bootstrap'
   'balancer overrides' 'hot subscription TCP' 'routing strategy restart' 'zapret marks' 'guest zone' 'sticky stop' 'DNS path fail-open')
 
 VM() {

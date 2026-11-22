@@ -5,17 +5,18 @@
 migrate_settings() {
 	# Traffic flags are saved with rmempty=false: write the defaults now, so the
 	# first Save & Apply without edits changes no UCI option.
-	[ -n "$(uci_get dns_hijack)" ] || uci_set dns_hijack 1
-	[ -n "$(uci_get disable_quic)" ] || uci_set disable_quic 1
+	[ -n "$(uci_get dns_hijack)" ] || uci_set dns_hijack 0
+	[ -n "$(uci_get disable_quic)" ] || uci_set disable_quic 0
 	[ -n "$(uci_get netbird_proxy)" ] || uci_set netbird_proxy 0
-	[ -n "$(uci_get bypass_ntp)" ] || uci_set bypass_ntp 1
-	[ -n "$(uci_get bypass_subscription_dns)" ] || uci_set bypass_subscription_dns 1
+	[ -n "$(uci_get bypass_ntp)" ] || uci_set bypass_ntp 0
+	[ -n "$(uci_get bypass_subscription_dns)" ] || uci_set bypass_subscription_dns 0
 	[ -n "$(uci_get lists_interval)" ] || uci_set lists_interval 0
 	[ -n "$(uci_get core_log_level)" ] || uci_set core_log_level warning
 	[ -n "$(uci_get geodata_cron)" ] || uci_set geodata_cron '0 5 * * *'
 	# Spec 13: new XrayWRT options; DNS upstreams stay empty (WAN DNS).
 	[ -n "$(uci_get mode)" ] || uci_set mode proxy-first
 	[ -n "$(uci_get dns_forward_other_types)" ] || uci_set dns_forward_other_types 0
+	[ -n "$(uci_get block_https_svcb)" ] || uci_set block_https_svcb 0
 	# Spec 13: no core auto-update; the hourly tick no longer checks the core.
 	# Spec 7.5: other DNS types are no longer refused, only forwarded on request.
 	# HTTPS records of VPN sites are never forwarded, so the block option is gone.
@@ -104,6 +105,7 @@ migrate_rules() {
 	# subscription keeps them in LIST_DIR, a parked one in its directory.
 	migrate_rules_dir "$LIST_DIR" always_proxy_dst.txt direct_dst.txt fake_domains.txt direct_domains.txt "$RULES_FILE" || return 1
 	for id in $(subscription_ids); do
+		[ -n "$(uci -q get "$PKG_CONFIG.$id.block_https_svcb")" ] || uci -q set "$PKG_CONFIG.$id.block_https_svcb=0"
 		migrate_rules_dir "$XRAY_SUBS_DIR/$id/lists" dst.txt direct.txt fake.txt direct-domains.txt "$XRAY_SUBS_DIR/$id/lists/rules.txt" || return 1
 		for opt in fake_domains_source dst_list_source direct_list_source; do
 			uci -q delete "$PKG_CONFIG.$id.$opt"

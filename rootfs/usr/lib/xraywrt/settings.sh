@@ -23,7 +23,7 @@ settings_uci_get() {
 # Only these settings belong to the provider; router-only options never do.
 settings_provider_key() {
 	case "$1" in
-	mode | disable_quic | dns_hijack | bypass_ntp | bypass_subscription_dns | block_client_ipv6 | dns_forward_other_types | lists_interval | core_log_level) return 0 ;;
+	mode | discord_voice | disable_quic | dns_hijack | bypass_ntp | bypass_subscription_dns | block_client_ipv6 | dns_forward_other_types | block_https_svcb | lists_interval | core_log_level) return 0 ;;
 	*) return 1 ;;
 	esac
 }
@@ -74,7 +74,7 @@ settings_bool() {
 settings_hours() {
 	local value=""
 
-	value="$(settings_value "$1" 24)"
+	value="$(settings_value "$1" 0)"
 	is_uint "$value" && [ "$value" -le 8760 ] || return 1
 	uint_norm "$value"
 }
@@ -213,11 +213,12 @@ settings_load() {
 		is_valid_iface_name "$iface" || settings_invalid source_network_interfaces "$iface" || return 1
 	done
 
-	DNS_HIJACK="$(settings_bool dns_hijack 1)"
-	DISABLE_QUIC="$(settings_bool disable_quic 1)"
+	DNS_HIJACK="$(settings_bool dns_hijack 0)"
+	DISABLE_QUIC="$(settings_bool disable_quic 0)"
+	DISCORD_VOICE="$(settings_bool discord_voice 0)"
 	NETBIRD_PROXY="$(settings_bool netbird_proxy 0)"
-	BYPASS_NTP="$(settings_bool bypass_ntp 1)"
-	BYPASS_SUBSCRIPTION_DNS="$(settings_bool bypass_subscription_dns 1)"
+	BYPASS_NTP="$(settings_bool bypass_ntp 0)"
+	BYPASS_SUBSCRIPTION_DNS="$(settings_bool bypass_subscription_dns 0)"
 	BLOCK_CLIENT_IPV6="$(settings_bool block_client_ipv6 0)"
 
 	NETBIRD_MARK="$(settings_uci_get netbird_mark "$NETBIRD_DEFAULT_MARK")"
@@ -253,6 +254,9 @@ settings_generator_load() {
 	case " $PROVIDER_OVERRIDES " in *" mode "*) MODE_OVERRIDE=1 ;; esac
 	DNS_FORWARD_OVERRIDE=0
 	case " $PROVIDER_OVERRIDES " in *" dns_forward_other_types "*) DNS_FORWARD_OVERRIDE=1 ;; esac
+	BLOCK_HTTPS_SVCB_OVERRIDE=0
+	case " $PROVIDER_OVERRIDES " in *" block_https_svcb "*) BLOCK_HTTPS_SVCB_OVERRIDE=1 ;; esac
+	BLOCK_HTTPS_SVCB="$(PROVIDER_KEYS='' settings_bool block_https_svcb 0)"
 	PROFILE_NAME="$(settings_subscription_option profile)"
 	GEODATA_ASSETS_JSON="$(settings_uci_get geodata_asset '[]')"
 	GEODATA_CRON="$(settings_uci_get geodata_cron '0 5 * * *')"

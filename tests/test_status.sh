@@ -47,7 +47,7 @@ echo ok >"$HEALTH_FILE"
 )
 json="$(status_json)"
 assert_eq "true|true|true|null" "$(jq -r '"\(.running)|\(.dns_ok)|\(.policy_active)|\(.config_valid)"' <<<"$json")" "checklist flags"
-assert_eq 'true|true|true' "$(jq -r '"\(.flags.dns_hijack)|\(.flags.disable_quic)|\(.flags.enabled)"' <<<"$json")" 'support summary allowlisted flags'
+assert_eq 'false|false|true' "$(jq -r '"\(.flags.dns_hijack)|\(.flags.disable_quic)|\(.flags.enabled)"' <<<"$json")" 'support summary allowlisted flags'
 assert_eq '["9.9.9.9"]' "$(jq -c .custom_dns_servers <<<"$json")" "only global custom servers reported"
 assert_eq 2 "$(jq .lists.dst <<<"$json")" "list count ignores comments"
 assert_eq "v1.19.32" "$(jq -r .core <<<"$json")" "core version"
@@ -331,6 +331,24 @@ const data = JSON.parse(text);
 if (!data.last_error.startsWith('0'.repeat(999))) throw new Error('diagnostic prefix lost');
 NODE
 pass 'byte-cut UTF-8 diagnostic survives real status JSON consumer'
+
+(
+ DISCORD_VOICE=1 POLICY_MODE=direct-first
+ NFT_APPLIED_FILE="$tmpdir/discord-applied"
+ mkdir -p "$ROUTE_PROC_ROOT/sys/net/netfilter"
+ echo 1 >"$ROUTE_PROC_ROOT/sys/net/netfilter/nf_conntrack_acct"
+ status_warnings >"$tmpdir/discord-warning"
+ assert_file_contains "$tmpdir/discord-warning" 'Discord Voice inactive' 'unapplied detector warns even when accounting is on'
+ echo 1 >"$NFT_APPLIED_FILE.discord_voice"
+ echo 0 >"$ROUTE_PROC_ROOT/sys/net/netfilter/nf_conntrack_acct"
+ status_warnings >"$tmpdir/discord-warning"
+ assert_file_not_contains "$tmpdir/discord-warning" 'Discord Voice inactive' 'installed detector remains ready after accounting changes'
+ POLICY_MODE=proxy-first
+ rm -f "$NFT_APPLIED_FILE.discord_voice"
+ status_warnings >"$tmpdir/discord-warning"
+ assert_file_not_contains "$tmpdir/discord-warning" 'Discord Voice inactive' 'proxy-first has no detector warning'
+)
+pass 'Discord Voice prerequisite warning'
 
 # A12.1: profile, core source, warnings, fake-IP domains and geodata (spec 15).
 CORE_JSON_FILE="$tmpdir/core.json"

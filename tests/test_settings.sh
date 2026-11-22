@@ -70,7 +70,7 @@ assert_eq 24 "$LISTS_INTERVAL" "explicit load refreshes settings"
 fake_uci_reset
 unset SETTINGS_LOADED
 settings_require
-assert_eq 24 "$LISTS_INTERVAL" "require loads when guard is absent"
+assert_eq 0 "$LISTS_INTERVAL" "require loads when guard is absent"
 pass "settings normalized and lazy loaded without suppressing refresh"
 
 # The lost-outbound latch belongs to UCI, never an inherited or stale value.
@@ -98,8 +98,8 @@ settings_load || fail "empty UCI must load"
 assert_eq "proxy-first" "$POLICY_MODE" "default policy mode"
 assert_eq redir-host "$DNS_MODE" "no config defaults to redir-host"
 assert_eq "br-lan" "$SOURCE_INTERFACES" "default source interface"
-assert_eq "1:1:0:1:1" "$DNS_HIJACK:$DISABLE_QUIC:$NETBIRD_PROXY:$BYPASS_NTP:$BYPASS_SUBSCRIPTION_DNS" "default toggles"
-assert_eq "0:24" "$SUBSCRIPTION_INTERVAL:$LISTS_INTERVAL" "default intervals (no provider period)"
+assert_eq "0:0:0:0:0" "$DNS_HIJACK:$DISABLE_QUIC:$NETBIRD_PROXY:$BYPASS_NTP:$BYPASS_SUBSCRIPTION_DNS" "default toggles"
+assert_eq "0:0" "$SUBSCRIPTION_INTERVAL:$LISTS_INTERVAL" "default intervals (no provider period)"
 assert_eq "113920" "$NETBIRD_MARK" "default NetBird mark"
 assert_eq 0 "$DIRECT_LISTENER" "no config has no direct listener"
 assert_eq warning "$CORE_LOG_LEVEL" "default Xray log level"
@@ -170,11 +170,19 @@ pass "settings rejects invalid values"
 
 fake_uci_reset
 fake_uci_set xraywrt.settings.mode direct-first
-fake_uci_set xraywrt.settings.provider_override 'mode dns_forward_other_types'
+fake_uci_set xraywrt.settings.provider_override 'mode dns_forward_other_types block_https_svcb'
+fake_uci_set xraywrt.settings.block_https_svcb 1
 fake_uci_set xraywrt.settings.source_network_interfaces 'br-lan wg0'
 fake_uci_set xraywrt.settings.bypass_ntp 0
 settings_load || fail "valid settings must load"
 assert_eq "direct-first:1:1|br-lan wg0|0" "$UCI_MODE:$MODE_OVERRIDE:$DNS_FORWARD_OVERRIDE|$SOURCE_INTERFACES|$BYPASS_NTP" "explicit values"
+assert_eq "1:1" "$BLOCK_HTTPS_SVCB:$BLOCK_HTTPS_SVCB_OVERRIDE" "HTTPS/SVCB user override loaded"
+assert_eq "1:true" "$(xray_params_json | jq -r '[.block_https_svcb,.block_https_svcb_override] | join(":")')" "generator receives opt-in and override"
+key_on="$(xray_config_key "$ROOT_DIR/tests/fixtures/xray/src/single.json")"
+fake_uci_set xraywrt.settings.block_https_svcb 0
+settings_load
+key_off="$(xray_config_key "$ROOT_DIR/tests/fixtures/xray/src/single.json")"
+[ "$key_on" != "$key_off" ] || fail 'HTTPS/SVCB setting invalidates runtime fingerprint'
 pass "settings explicit values"
 
 fake_uci_reset
@@ -279,7 +287,7 @@ fake_uci_reset
 fake_uci_set xraywrt.settings.lists_interval 0
 settings_load
 assert_eq 0 "$LISTS_INTERVAL" 'existing lists interval 0 preserved'
-assert_file_contains "$ROOT_DIR/rootfs/etc/config/xraywrt" "option lists_interval '24'" 'shipped default interval'
+assert_file_contains "$ROOT_DIR/rootfs/etc/config/xraywrt" "option lists_interval '0'" 'shipped default interval'
 pass 'default interval and existing disabled interval'
 
 # Private runtime directories must be safe before the first service start.

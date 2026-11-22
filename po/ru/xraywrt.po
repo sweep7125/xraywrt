@@ -931,8 +931,8 @@ msgstr "Остановлено: Xray не принял конфигурацию.
 msgid "Mode: %s"
 msgstr "Режим: %s"
 
-msgid "No VPN DNS is configured: the DNS servers of the internet connection (WAN) are used."
-msgstr "DNS для VPN не задан: используются DNS-серверы интернет-подключения (WAN)."
+msgid "No VPN DNS is configured: the DNS servers of the internet connection (WAN) are used directly."
+msgstr "DNS для VPN не задан: DNS-серверы интернет-подключения (WAN) используются напрямую."
 
 msgid "The subscription setting \"%s\" is unknown or invalid and was ignored."
 msgstr "Настройка подписки «%s» неизвестна или неверна и пропущена."
@@ -976,8 +976,8 @@ msgstr "Скачивать подписку напрямую"
 msgid "Other DNS query types (TXT, SRV, MX…)"
 msgstr "Прочие типы DNS-запросов (TXT, SRV, MX…)"
 
-msgid "Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Direct forwarding exposes these queries to your internet provider."
-msgstr "Xray отвечает только на A и AAAA. На прочие типы приходит пустой ответ, пока вы их не пересылаете. При пересылке напрямую эти запросы видит ваш интернет-провайдер."
+msgid "Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Raw forwarding sends ordinary DNS to an IP:port, not DoH. Direct forwarding exposes these queries to your internet provider."
+msgstr "Xray отвечает только на запросы A и AAAA. Остальные типы получают пустой ответ, если их не пересылать. Пересылка отправляет обычный DNS на IP:порт, а не DoH. При прямой пересылке эти запросы видны интернет-провайдеру."
 
 msgid "Do not forward"
 msgstr "Не пересылать"
@@ -1687,3 +1687,22 @@ msgstr "Адресные правила с именованной целью и 
 
 msgid "Rules for %s stay saved but some are not applied because Xray may replace their destination IP with a site name."
 msgstr "Правила для %s остаются сохранёнными, но некоторые не применяются, потому что Xray может заменить IP-адрес назначения именем сайта."
+
+
+msgid "Do not forward HTTPS/SVCB"
+msgstr "Не пересылать HTTPS/SVCB"
+
+msgid "Returns empty answers for whole HTTPS and SVCB records, not only ECH, when forwarding other DNS query types. When disabled, bare FakeDNS still blocks HTTPS/SVCB; scoped FakeDNS still blocks raw queries for matching names."
+msgstr "При пересылке других типов DNS-запросов возвращает пустой ответ для целых записей HTTPS и SVCB, а не только ECH. При отключении этого параметра FakeDNS без ограничений по-прежнему блокирует HTTPS/SVCB, а FakeDNS с ограничениями — пересылку необработанных запросов для соответствующих имён."
+
+msgid "Direct devices bypass VPN rules, but client IPv6 blocking still applies."
+msgstr "Устройства напрямую обходят правила VPN, но блокировка IPv6 для клиентов продолжает действовать."
+
+msgid "Discord Voice"
+msgstr "Голос Discord"
+
+msgid "Send recognized Discord Voice traffic through Xray in direct-first mode. Requires conntrack accounting."
+msgstr "Направлять распознанный голосовой трафик Discord через Xray в режиме прямого доступа по умолчанию. Требуется учёт соединений conntrack."
+
+msgid "Discord Voice inactive: enable conntrack accounting if needed (nf_conntrack_acct=1) and reload XrayWRT."
+msgstr "Голос Discord не активен: при необходимости включите учёт соединений (nf_conntrack_acct=1) и перезагрузите XrayWRT."

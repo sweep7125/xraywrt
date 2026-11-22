@@ -259,34 +259,18 @@ nft_render_personal_addresses() {
 	done
 }
 
-# In fake-IP mode selected devices leave the caller via goto: a real-IP
-# return must exit prerouting_policy, not resume at its catch-all mark.
-# Direct devices: proxy-first returns them (redir-host) or splits them
-# (fake-IP); direct-first needs them only to send their fake-IPs to the direct
-# listener (spec 8: both modes).
-nft_direct_devices_active() {
-	if [ "$DNS_MODE" = "fake-ip" ]; then
-		[ "${DIRECT_LISTENER:-0}" = "1" ]
-	else
-		[ "$POLICY_MODE" = "proxy-first" ]
-	fi
-}
-
+# Goto makes real-IP returns leave the policy instead of resuming proxy capture.
 nft_render_direct_devices() {
-	local chain="$1" f4="$2" f6="$3" fmac="$4" action="return"
+	local chain="$1" f4="$2" f6="$3" fmac="$4" action="goto direct_device_policy"
 
-	if [ "$DNS_MODE" = "fake-ip" ]; then
-		[ "${DIRECT_LISTENER:-0}" = "1" ] || return 0
-		# proxy-first: goto skips the catch-all for real IPs; direct-first: jump
-		# returns real IPs to the remaining policy.
-		action="goto direct_device_policy"
-		[ "$POLICY_MODE" = "proxy-first" ] || action="jump direct_device_policy"
-		nft_line "add chain inet $NFT_TABLE_NAME direct_device_policy"
-		nft_rule direct_device_policy "meta nfproto ipv6 return"
-		nft_rule direct_device_policy "ip daddr != $FAKEIP_RANGE return"
-		[ "$DISABLE_QUIC" = "1" ] && nft_rule direct_device_policy "ip daddr $FAKEIP_RANGE udp dport 443 reject"
+	nft_line "add chain inet $NFT_TABLE_NAME direct_device_policy"
+	nft_rule direct_device_policy "meta nfproto ipv6 return"
+	nft_rule direct_device_policy "ip daddr != $FAKEIP_RANGE return"
+	[ "$DISABLE_QUIC" = "1" ] && nft_rule direct_device_policy "ip daddr $FAKEIP_RANGE udp dport 443 reject"
+	if [ "$DNS_MODE" = "fake-ip" ] && [ "${DIRECT_LISTENER:-0}" = "1" ]; then
 		nft_rule direct_device_policy "ip daddr $FAKEIP_RANGE meta l4proto { tcp, udp } $NFT_MARK_SET | $NFT_DIRECT_MARK accept"
 	fi
+	nft_rule direct_device_policy "ip daddr $FAKEIP_RANGE reject"
 	nft_has_plain_entries "$fmac" && nft_rule "$chain" "ether saddr @direct_src_mac $action"
 	nft_has_plain_entries "$f4" && nft_rule "$chain" "ip saddr @direct_src $action"
 	nft_has_plain_entries "$f6" && nft_rule "$chain" "ip6 saddr @direct_src6 $action"
@@ -310,15 +294,21 @@ nft_render_catch_all() {
 nft_render() {
 	local file="$1" dir="$2" kind="" kinds="" only="" personal="$2/personal-addresses"
 
+	local discord_voice_ready=0
+	if [ "${DISCORD_VOICE:-0}" = 1 ] && [ "$POLICY_MODE" = direct-first ]; then
+		if [ "${DISCORD_ACCOUNTING-$(cat "${ROUTE_PROC_ROOT:-/proc}/sys/net/netfilter/nf_conntrack_acct" 2>/dev/null)}" = 1 ]; then
+			discord_voice_ready=1
+		else
+			warn "Discord Voice inactive: enable conntrack accounting if needed (nf_conntrack_acct=1) and reload XrayWRT."
+		fi
+	fi
 	NFT_FILE="$file"
 	NFT_MARK_SET="meta mark set meta mark | $NFT_INTERCEPT_MARK"
 	: >"$NFT_FILE" || return 1
 	if [ "$POLICY_MODE" = "proxy-first" ]; then
 		kinds="direct direct_src"
-	elif nft_direct_devices_active; then
-		kinds="dst src direct direct_src"
 	else
-		kinds="dst src direct"
+		kinds="dst src direct direct_src"
 	fi
 	if [ -s "$RULES_FILE" ]; then
 		lists_rules_remote_json >"$dir/personal-caches.json" || return 1
@@ -341,11 +331,9 @@ nft_render() {
 	nft_fill_set proxy_src_mac "$dir/src.mac"
 	nft_fill_set direct_dst "$dir/direct.4"
 	nft_fill_set direct_dst6 "$dir/direct.6"
-	if nft_direct_devices_active; then
-		nft_fill_set direct_src "$dir/direct_src.4"
-		nft_fill_set direct_src6 "$dir/direct_src.6"
-		nft_fill_set direct_src_mac "$dir/direct_src.mac"
-	fi
+	nft_fill_set direct_src "$dir/direct_src.4"
+	nft_fill_set direct_src6 "$dir/direct_src.6"
+	nft_fill_set direct_src_mac "$dir/direct_src.mac"
 
 	# DNS hijack to dnsmasq (spec 7.1; the core DNS inbound is loopback-only) and NetBird ingress exclusion.
 	nft_rule dns_hijack "iifname \"$NETBIRD_INTERFACE\" return"
@@ -361,10 +349,10 @@ nft_render() {
 	nft_rule prerouting_policy "ct direction reply return"
 	nft_render_guards prerouting_policy
 	[ "$DNS_HIJACK" = "1" ] && nft_rule prerouting_policy "meta l4proto { tcp, udp } th dport 53 return"
+	nft_render_direct_devices prerouting_policy "$dir/direct_src.4" "$dir/direct_src.6" "$dir/direct_src.mac"
 	if [ "$POLICY_MODE" = "proxy-first" ]; then
 		nft_render_direct_returns prerouting_policy "$dir/direct.4" "$dir/direct.6"
 		[ ! -s "$personal" ] || nft_rule prerouting_policy "jump personal_addresses"
-		nft_render_direct_devices prerouting_policy "$dir/direct_src.4" "$dir/direct_src.6" "$dir/direct_src.mac"
 		nft_render_catch_all prerouting_policy
 	else
 		# Own addresses that go direct win over the provider's list below.
@@ -377,9 +365,13 @@ nft_render() {
 		if [ -s "$dir/src.mac" ]; then
 			nft_rule prerouting_policy "ether saddr @proxy_src_mac meta l4proto { tcp, udp } $NFT_MARK_SET"
 		fi
-		# Direct devices divert only their fake-IPs (jump): real IPs keep the lists above.
-		nft_direct_devices_active && nft_render_direct_devices prerouting_policy "$dir/direct_src.4" "$dir/direct_src.6" "$dir/direct_src.mac"
 		nft_render_fakeip prerouting_policy
+		if [ "$discord_voice_ready" = 1 ]; then
+			# The audited conntrack bit persists while OFF; live marked flows can resume on re-enable.
+			local discord_voice_ports='{ 19294-19344, 50000-50099 }'
+			nft_rule prerouting_policy "meta nfproto ipv4 meta mark & $NFT_INTERCEPT_MARK == 0 meta l4proto udp udp dport $discord_voice_ports ct direction original ct original packets 1 udp length 82 @th,64,32 0x00010046 @th,128,128 0x0 @th,256,128 0x0 @th,384,128 0x0 @th,512,128 0x0 ct mark set ct mark | $NFT_DISCORD_VOICE_CT_MARK"
+			nft_rule prerouting_policy "meta nfproto ipv4 meta mark & $NFT_INTERCEPT_MARK == 0 meta l4proto udp udp dport $discord_voice_ports ct direction original ct mark & $NFT_DISCORD_VOICE_CT_MARK == $NFT_DISCORD_VOICE_CT_MARK $NFT_MARK_SET"
+		fi
 	fi
 
 	# Clear the matched bit so ICMP's reverse lookup cannot select our LOCAL route.
@@ -441,9 +433,10 @@ nft_input_hash() {
 		printf '%s\n' "$files" \
 			"${POLICY_MODE:-}" "${DNS_MODE:-}" "${DIRECT_LISTENER:-0}" \
 			"${SOURCE_INTERFACES:-}" "${DNS_HIJACK:-}" "${DISABLE_QUIC:-}" \
-			"${BYPASS_NTP:-}" "${BLOCK_CLIENT_IPV6:-0}" \
+			"${BYPASS_NTP:-}" "${BLOCK_CLIENT_IPV6:-0}" "${DISCORD_VOICE:-0}" \
+			"${DISCORD_ACCOUNTING-$(cat "${ROUTE_PROC_ROOT:-/proc}/sys/net/netfilter/nf_conntrack_acct" 2>/dev/null)}" \
 			"${NETBIRD_INTERFACE:-}" "${NETBIRD_MARK:-}" "${NETBIRD_PROXY:-}" \
-			"$NFT_TABLE_NAME" "$NFT_INTERCEPT_MARK" "$NFT_DIRECT_MARK" \
+			"$NFT_TABLE_NAME" "$NFT_INTERCEPT_MARK" "$NFT_DIRECT_MARK" "$NFT_DISCORD_VOICE_CT_MARK" \
 			"$XRAY_ROUTING_MARK" "$XRAY_DNS_PORT" "$XRAY_TPROXY_PORT" \
 			"$XRAY_DIRECT_TPROXY_PORT" "$XRAY_API_PORT" "$FAKEIP_RANGE" \
 			"$ZAPRET_DESYNC_MARK" "$ZAPRET_DESYNC_MARK_POSTNAT" \
@@ -496,11 +489,19 @@ nft_fw4_input_cleanup() {
 	return 0
 }
 
+nft_discord_readiness_save() {
+	local ready=0
+	[ "${DISCORD_VOICE:-0}" != 1 ] || [ "$POLICY_MODE" != direct-first ] || [ "$DISCORD_ACCOUNTING" != 1 ] || ready=1
+	atomic_write "$NFT_APPLIED_FILE.discord_voice" "$ready" || rm -f "$NFT_APPLIED_FILE.discord_voice"
+}
+
 nft_apply() {
 	rm -f "$NET_FP_FILE"
 	settings_require || return 1
 
 	local dir="$PKG_TMP_DIR/nft" rc=0 hash="" previous="" inputs="" previous_inputs=""
+	local DISCORD_ACCOUNTING
+	DISCORD_ACCOUNTING="$(cat "${ROUTE_PROC_ROOT:-/proc}/sys/net/netfilter/nf_conntrack_acct" 2>/dev/null)" || DISCORD_ACCOUNTING=""
 
 	inputs="$(nft_input_hash)" || inputs=""
 	inputs="${inputs%% *}"
@@ -508,6 +509,7 @@ nft_apply() {
 	{ IFS= read -r previous_inputs <"$NFT_APPLIED_FILE.inputs"; } 2>/dev/null || :
 	if [ -n "$inputs" ] && [ -n "$previous" ] &&
 		[ "$inputs $previous" = "$previous_inputs" ] && nft_active; then
+		[ -f "$NFT_APPLIED_FILE.discord_voice" ] || nft_discord_readiness_save
 		nft_fw4_input_apply
 		return $?
 	fi
@@ -520,6 +522,7 @@ nft_apply() {
 		hash="${hash%% *}"
 	fi
 	if [ "$rc" -eq 0 ] && [ "$hash" = "$previous" ] && nft_active; then
+		nft_discord_readiness_save
 		[ -z "$inputs" ] || atomic_write "$NFT_APPLIED_FILE.inputs" "$inputs $hash" || rm -f "$NFT_APPLIED_FILE.inputs"
 		rm -rf "$dir"
 		nft_fw4_input_apply
@@ -534,6 +537,7 @@ nft_apply() {
 		err_code nft_policy "Failed to apply nftables policy (see %s)" "$dir/ruleset.nft"
 		return 1
 	fi
+	nft_discord_readiness_save
 	{ printf '%s\n' "$hash" >"$dir/ruleset.sha256" &&
 		mv -f "$dir/ruleset.sha256" "$NFT_APPLIED_FILE"; } || rm -f "$NFT_APPLIED_FILE"
 	[ -z "$inputs" ] || atomic_write "$NFT_APPLIED_FILE.inputs" "$inputs $hash" || rm -f "$NFT_APPLIED_FILE.inputs"
@@ -550,7 +554,9 @@ nft_apply_if_ready() {
 # Keep the harmless fw4 include across stops and watchdog flaps; only uninstall removes it.
 nft_cleanup() {
 	rm -f "$NET_FP_FILE" "$NFT_APPLIED_FILE" "$NFT_APPLIED_FILE.inputs"
-	nft delete table inet "$NFT_TABLE_NAME" 2>/dev/null || :
+	if nft delete table inet "$NFT_TABLE_NAME" 2>/dev/null || ! nft_active; then
+		rm -f "$NFT_APPLIED_FILE.discord_voice"
+	fi
 }
 
 nft_active() {

@@ -118,9 +118,9 @@ function select_profile(src, want, profile) {
 }
 
 const BOOL_KEYS = {
-	'disable-quic': 'disable_quic', 'dns-hijack': 'dns_hijack', 'bypass-ntp': 'bypass_ntp',
+	'discord-voice': 'discord_voice', 'disable-quic': 'disable_quic', 'dns-hijack': 'dns_hijack', 'bypass-ntp': 'bypass_ntp',
 	'bypass-subscription-dns': 'bypass_subscription_dns', 'block-client-ipv6': 'block_client_ipv6',
-	'dns-forward-other-types': 'dns_forward_other_types'
+	'dns-forward-other-types': 'dns_forward_other_types', 'block-https-svcb': 'block_https_svcb'
 };
 
 function hours_of(v) {
@@ -302,11 +302,28 @@ function with_mark(ob, mark) {
 	return ob;
 }
 
+function references_legacy_block(value) {
+	if (type(value) == 'array') {
+		for (let item in value) if (references_legacy_block(item)) return true;
+	} else if (type(value) == 'object') {
+		for (let key, item in value) {
+			if (key in ['outboundTag', 'dialerProxy', 'fallbackTag'] &&
+			    (item == 'xraywrt-block' || type(item) == 'array' && 'xraywrt-block' in item)) return true;
+			if (key in ['selector', 'subjectSelector'] && type(item) == 'array')
+				for (let prefix in item)
+					if (type(prefix) == 'string' && substr('xraywrt-block', 0, length(prefix)) == prefix) return true;
+			if (key == 'proxySettings' && item?.tag == 'xraywrt-block') return true;
+			if (references_legacy_block(item)) return true;
+		}
+	}
+	return false;
+}
+
 // Spec 6.4: every provider outbound (chains too) dials with the router mark,
 // so nft lets core traffic out without a TPROXY loop. The first outbound
 // stays first (Xray's default); service outbounds go last.
 function apply_outbounds(cfg, params, profile) {
-	let mark = params.mark;
+	let mark = params.mark, legacy_block = references_legacy_block(cfg);
 	for (let i, ob in cfg.outbounds) {
 		if (type(ob) != 'object') die(code_message('config_invalid', 'config: %s', sprintf('outbound #%d is not an object', i + 1)));
 		let old = ob.streamSettings?.sockopt?.mark;
@@ -314,17 +331,11 @@ function apply_outbounds(cfg, params, profile) {
 			warn_code(profile, 'outbound_mark', 'outbound "%s" mark %s replaced with %s', ob.tag ?? '#' + (i + 1), old, mark);
 		with_mark(ob, mark);
 	}
-	// Direct devices dial like the provider's own direct outbound (spec 6.4).
-	let sockopt = {};
-	for (let ob in cfg.outbounds) {
-		let he = ob.streamSettings?.sockopt?.happyEyeballs;
-		if (ob.tag == 'direct' && ob.protocol == 'freedom' && type(he) == 'object')
-			sockopt.happyEyeballs = he;
-	}
-	// ForceIP: internal DNS skips fakedns, AsIs would get the fake-IP back.
-	sockopt.domainStrategy = 'ForceIP';
-	push(cfg.outbounds,
-		with_mark({tag: 'xraywrt-direct', protocol: 'freedom', streamSettings: {sockopt}}, mark));
+	let directs = filter(cfg.outbounds, (ob) => type(ob.tag) == 'string' && lc(ob.tag) == 'direct');
+	let direct = length(directs) == 1 ? directs[0] : null;
+	let direct_tag = direct?.tag ?? 'xraywrt-direct';
+	// Bootstrap must not inherit a provider redirect or recursively resolve DNS.
+	push(cfg.outbounds, with_mark({tag: 'xraywrt-direct', protocol: 'freedom', streamSettings: {sockopt: {domainStrategy: 'ForceIP'}}}, mark));
 	// Spec 6.4: nft never sends private addresses to the core, so only a
 	// whitelist domain resolving to one (DNS rebinding) reaches them here.
 	let nets = params.local_nets ?? [];
@@ -340,9 +351,11 @@ function apply_outbounds(cfg, params, profile) {
 		if (type(own) != 'array') die(code_message('config_invalid', 'config: %s', sprintf('outbound "%s" finalRules is not an array', ob.tag ?? '#' + (i + 1))));
 		ob.settings.finalRules = [...head, ...own];
 	}
-	push(cfg.outbounds,
-		{tag: 'xraywrt-block', protocol: 'blackhole'},
-		with_mark({tag: 'xraywrt-dns', protocol: 'dns'}, mark));
+	let blocks = filter(cfg.outbounds, (ob) => type(ob.tag) == 'string' && lc(ob.tag) == 'block');
+	let block_tag = length(blocks) == 1 && blocks[0].protocol == 'blackhole' ? blocks[0].tag : 'xraywrt-block';
+	if (block_tag == 'xraywrt-block' || legacy_block) push(cfg.outbounds, {tag: 'xraywrt-block', protocol: 'blackhole'});
+	push(cfg.outbounds, with_mark({tag: 'xraywrt-dns', protocol: 'dns'}, mark));
+	return {block_tag, direct_tag};
 }
 
 function is_fakedns(s) {
@@ -373,7 +386,7 @@ function tproxy_inbound(tag, listen, port, sniffing) {
 function router_inbounds(params, fake, sniffing) {
 	let p = params.ports;
 	if (fake) {
-		if (sniffing?.enabled != true) sniffing = {enabled: true, destOverride: ['fakedns']};
+		if (sniffing?.enabled != true) sniffing = {enabled: true, destOverride: ['fakedns'], routeOnly: true};
 		else if (!('fakedns' in (sniffing.destOverride ?? [])))
 			sniffing.destOverride = ['fakedns', ...(sniffing.destOverride ?? [])];
 	}
@@ -382,7 +395,7 @@ function router_inbounds(params, fake, sniffing) {
 	if (params.ipv6) push(list, tproxy_inbound('xraywrt-tproxy6', '::1', p.tproxy, sniffing));
 	// nft sends only the IPv4 fake pool of direct devices here (spec 6.3, 7.2).
 	if (fake)
-		push(list, tproxy_inbound('xraywrt-fakeip-direct', '127.0.0.1', p.direct, {enabled: true, destOverride: ['fakedns']}));
+		push(list, tproxy_inbound('xraywrt-fakeip-direct', '127.0.0.1', p.direct, {enabled: true, destOverride: ['fakedns'], routeOnly: true}));
 	let dns = {allowedNetwork: 'tcp,udp'}, raw = raw_forward(params);
 	if (raw) {
 		dns.rewriteAddress = raw[0];
@@ -422,7 +435,7 @@ function router_api(params) {
 // Spec 6.5: router rules go first, the provider's follow unchanged.
 // direct_ips: WAN DNS that the internal DNS may reach directly (7.3).
 // own: the routing rules of My rules, already in the order of its lines.
-function router_rules(cfg, params, fake, direct_ips, own) {
+function router_rules(cfg, params, fake, direct_ips, own, block_tag, direct_tag) {
 	if (cfg.routing == null) cfg.routing = {};
 	if (type(cfg.routing) != 'object') die(code_message('config_invalid', 'config: %s', 'routing is not an object'));
 	let provider = cfg.routing.rules ?? [];
@@ -432,8 +445,8 @@ function router_rules(cfg, params, fake, direct_ips, own) {
 		{inboundTag: ['xraywrt-dns-internal'], ip: ['127.0.0.1', ...direct_ips], port: 53, outboundTag: 'xraywrt-direct'}
 	];
 	if (fake)
-		push(rules, {ip: [params.fakeip_range], outboundTag: 'xraywrt-block'},
-			{inboundTag: ['xraywrt-fakeip-direct'], outboundTag: 'xraywrt-direct'});
+		push(rules, {ip: [params.fakeip_range], outboundTag: block_tag},
+			{inboundTag: ['xraywrt-fakeip-direct'], outboundTag: direct_tag});
 	cfg.routing.rules = [...rules, ...own, ...provider];
 }
 
@@ -520,8 +533,7 @@ function router_dns(cfg, params, profile) {
 		if (length(params.wan_dns ?? [])) {
 			push(list, ...params.wan_dns);
 			profile_record(profile, 'uses-wan-dns');
-			if (params.mode == 'direct-first') direct = params.wan_dns;
-			else warn_code(profile, 'dns_wan', 'no proxy DNS configured, using WAN DNS');
+			direct = params.wan_dns;
 		} else {
 			die(code_message('config_invalid', 'config: %s', 'no DNS server: add dns.servers to the configuration'));
 		}
@@ -892,7 +904,7 @@ function address_route_rules(rows, shadows, ref, tag, nonpacket) {
 // with the same target and kind make one run, so a run is one DNS server
 // entry and one routing rule and first-match order is that of the lines.
 // Returns the DNS entries and routing rules for the generator.
-function own_rules(cfg, params, api, profile, original_dns_tag, sniffing) {
+function own_rules(cfg, params, api, profile, original_dns_tag, sniffing, direct_tag) {
 	let found = rule_targets(cfg), balancers = map(type(cfg.routing?.balancers) == 'array' ? cfg.routing.balancers : [], (b) => b?.tag);
 	for (let tag in found.tags) profile_record(profile, 'rules-target', tag);
 	for (let tag in found.reserved) profile_record(profile, 'rules-reserved', tag);
@@ -956,7 +968,7 @@ function own_rules(cfg, params, api, profile, original_dns_tag, sniffing) {
 	let dns = [], rules = [], direct_count = 0, fake_count = 0;
 	for (let i, run in runs) {
 		let values = map(run.items, (e) => e.value), ref;
-		if (run.target == 'direct') ref = {outboundTag: 'xraywrt-direct'};
+		if (run.target == 'direct') ref = {outboundTag: direct_tag};
 		else if (run.target in balancers) ref = {balancerTag: run.target};
 		else ref = {outboundTag: run.target};
 		if (run.kind == 'site') {
@@ -980,7 +992,13 @@ function own_rules(cfg, params, api, profile, original_dns_tag, sniffing) {
 				fake_count += length(values);
 				push(dns, {address: 'fakedns', domains: values, skipFallback: true, queryStrategy: 'UseIPv4'});
 			}
-			if (run.target != 'core') push(rules, {domain: values, ...ref, ruleTag: sprintf('xraywrt-rule-%d', i + 1)});
+			if (run.target != 'core') {
+				let tag = sprintf('xraywrt-rule-%d', i + 1);
+				if (run.target == 'direct' && direct_tag != 'xraywrt-direct') {
+					push(rules, {domain: values, inboundTag: ['xraywrt-tproxy4', 'xraywrt-tproxy6'], ...ref, ruleTag: tag});
+					push(rules, {domain: values, outboundTag: 'xraywrt-direct', ruleTag: tag + '-service'});
+				} else push(rules, {domain: values, ...ref, ruleTag: tag});
+			}
 		} else if (run.target in RULE_WORDS) {
 			if (ordered) for (let row in run.rows) add_address_shadow(shadows, row);
 		} else if (run.oversized) {
@@ -1039,7 +1057,7 @@ function dns_outbound(cfg, params, profile) {
 		if (length(domains)) push(rules, {domain: domains, action: 'return'});
 		// A fakedns server without domains covers every name: HTTPS/SVCB
 		// records would hand clients real addresses past the fake-IP range.
-		if (length(filter(cfg.dns.servers, (s) => is_fakedns(s) && type(s.domains) != 'array')))
+		if (bool_of(params.block_https_svcb) == '1' || length(filter(cfg.dns.servers, (s) => is_fakedns(s) && (type(s.domains) != 'array' || !length(s.domains)))))
 			push(rules, {qType: '65,64', action: 'return'});
 		if (via) {
 			ob.streamSettings.sockopt.dialerProxy = via;
@@ -1170,30 +1188,6 @@ function geodata_refs(cfg, profile) {
 	for (let f in geodata_files(cfg)) profile_record(profile, 'geodata-ref', f);
 }
 
-// UX 4.1a: only a rule covering all traffic replaces the default outbound.
-function infer_mode(cfg, profile) {
-	let target = cfg.outbounds[0];
-	for (let r in (type(cfg.routing?.rules) == 'array' ? cfg.routing.rules : [])) {
-		if (type(r) != 'object') continue;
-		let conditions = filter(keys(r), (k) => !(k in ['type', 'outboundTag', 'balancerTag', 'ruleTag']));
-		let all = !length(conditions);
-		if (length(conditions) == 1) {
-			let k = conditions[0], v = r[k];
-			if (k == 'network' && type(v) == 'string') {
-				let networks = map(split(v, ','), (n) => trim(n));
-				all = 'tcp' in networks && 'udp' in networks;
-			} else if (k == 'ip' && type(v) == 'array') all = '0.0.0.0/0' in v && '::/0' in v;
-			else if (k == 'port') all = v in ['0-65535', '1-65535'];
-		}
-		if (!all) continue;
-		target = r.balancerTag != null ? null : filter(cfg.outbounds, (ob) => ob.tag == r.outboundTag)[0];
-		break;
-	}
-	let selected = 'has proxy-ips' in profile || length(filter(cfg.dns.servers,
-		(s) => is_fakedns(s) && type(s) == 'object' && type(s.domains) == 'array' && length(s.domains)));
-	return target?.protocol == 'freedom' && !target.streamSettings?.sockopt?.dialerProxy && selected ? 'direct-first' : 'proxy-first';
-}
-
 function generate(text, params, api) {
 	let profile = [];
 	profile_record(profile, 'profile-schema', 1);
@@ -1207,6 +1201,8 @@ function generate(text, params, api) {
 	if (mode_source == 'provider') params.mode = substr(pm[0], 9);
 	let pf = filter(profile, (l) => substr(l, 0, 28) == 'set dns_forward_other_types ');
 	if (length(pf) && !params.dns_forward_override) params.dns_forward_other_types = substr(pf[0], 28);
+	let pb = filter(profile, (l) => substr(l, 0, 21) == 'set block_https_svcb ');
+	if (length(pb) && !params.block_https_svcb_override) params.block_https_svcb = substr(pb[0], 21);
 	let sniffing = provider_sniffing(cfg);
 	let sniff = sniffing?.enabled == true ? join(',', map(sniffing.destOverride ?? [], (name) => type(name) == 'string' ? lc(name) : '')) : '';
 	profile_record(profile, 'sniff', (sniff || '0'));
@@ -1228,27 +1224,23 @@ function generate(text, params, api) {
 	cfg = apply_ownership(cfg, params, profile);
 	let hosts = server_hosts(cfg);
 	for (let h in hosts) profile_record(profile, 'server-host', h);
-	apply_outbounds(cfg, params, profile);
+	let tags = apply_outbounds(cfg, params, profile);
 	let original_dns_tag = cfg.dns?.tag;
 	let direct_ips = router_dns(cfg, params, profile);
-	if (mode_source == 'auto') params.mode = infer_mode(cfg, profile);
+	if (mode_source == 'auto') params.mode = 'proxy-first';
 	// Keep the mode near provider settings in the line-oriented profile.
 	let mode_records = [];
 	profile_record(mode_records, 'mode', params.mode);
 	profile_record(mode_records, 'mode-source', mode_source);
 	profile = [...slice(profile, 0, mode_at), ...mode_records, ...slice(profile, mode_at)];
-	// WAN DNS routing depends on the effective mode, not the stored UCI value.
-	if ('uses-wan-dns' in profile) {
-		direct_ips = params.mode == 'direct-first' ? params.wan_dns : [];
-		profile = filter(profile, (l) => !match(l, / \[E:dns_wan\]$/));
-		if (params.mode != 'direct-first') warn_code(profile, 'dns_wan', 'no proxy DNS configured, using WAN DNS');
-	}
-	let own = own_rules(cfg, params, api, profile, original_dns_tag, sniffing);
+	if ('uses-wan-dns' in profile && params.mode == 'proxy-first')
+		warn_code(profile, 'dns_wan', 'no proxy DNS configured, using WAN DNS directly');
+	let own = own_rules(cfg, params, api, profile, original_dns_tag, sniffing, tags.direct_tag);
 	let fake = router_fakedns(cfg, params, own, profile);
 	check_inbound_ports(cfg, params);
 	push(cfg.inbounds, ...router_inbounds(params, fake, sniffing));
 	cfg.api = router_api(params);
-	router_rules(cfg, params, fake, direct_ips, own.rules);
+	router_rules(cfg, params, fake, direct_ips, own.rules, tags.block_tag, tags.direct_tag);
 	dns_outbound(cfg, params, profile);
 	if (type(cfg.geodata) == 'object') geodata_provider_cron(cfg, params, profile);
 	geodata_user_assets(cfg, params, profile);

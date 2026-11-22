@@ -20,7 +20,7 @@ gen_rules() {
 	gen "$tmpdir/src.json" ".mode_override = true | .mode = \"$1\" | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {} ${3:+| $3}"
 	assert_eq 0 "$rc" "$1: generate: $errtxt"
 }
-own_rules() { jq -c '[.routing.rules[] | select((.ruleTag // "") | startswith("xraywrt-rule-"))]' <<<"$out"; }
+own_rules() { jq -c '[.routing.rules[] | select((.ruleTag // "") | startswith("xraywrt-rule-")) | select((.ruleTag | endswith("-service")) | not) | if .inboundTag == ["xraywrt-tproxy4","xraywrt-tproxy6"] and (.port == null and .network == null) then del(.inboundTag) else . end]' <<<"$out"; }
 dns_servers() { jq -c .dns.servers <<<"$out"; }
 core_test() {
 	xray-test run -test -c "$tmpdir/out.json" >"$tmpdir/core.log" 2>&1 || fail "$1: core test: $(cat "$tmpdir/core.log")"
@@ -61,16 +61,16 @@ src_json "{\"outbounds\":[$direct_ob,$proxy_ob,$second_ob],\"routing\":{\"balanc
 for mode in direct-first proxy-first; do
  gen_rules "$mode" $'overlap.example;443;udp direct\noverlap.example;443;tcp proxy\nother.example;;udp pool'
  jq -e '[.routing.rules[] | select((.ruleTag // "") | startswith("xraywrt-rule-")) | {domain,port,network,outboundTag,balancerTag}] == [
-  {domain:["domain:overlap.example"],port:"443",network:"udp",outboundTag:"xraywrt-direct",balancerTag:null},
+  {domain:["domain:overlap.example"],port:"443",network:"udp",outboundTag:"direct",balancerTag:null},
   {domain:["domain:overlap.example"],port:"443",network:"tcp",outboundTag:"proxy",balancerTag:null},
   {domain:["domain:other.example"],port:null,network:"udp",outboundTag:null,balancerTag:"pool"}]' <<<"$out" >/dev/null || fail "$mode: qualified site tuples: $(own_rules)"
  assert_eq '["192.0.2.53"]' "$(dns_servers)" "$mode: qualified sites do not add DNS entries"
  core_test "$mode qualified sites"
 done
 gen_rules direct-first $'example.com;443;udp proxy\nexample.com direct'
-jq -e '[.[] | {domain,port,network,outboundTag}] == [{domain:["domain:example.com"],port:"443",network:"udp",outboundTag:"proxy"},{domain:["domain:example.com"],port:null,network:null,outboundTag:"xraywrt-direct"}]' <<<"$(own_rules)" >/dev/null || fail 'qualified route precedes unqualified route'
+jq -e '[.[] | {domain,port,network,outboundTag}] == [{domain:["domain:example.com"],port:"443",network:"udp",outboundTag:"proxy"},{domain:["domain:example.com"],port:null,network:null,outboundTag:"direct"}]' <<<"$(own_rules)" >/dev/null || fail 'qualified route precedes unqualified route'
 gen_rules direct-first $'example.com direct\nexample.com;443;udp proxy'
-jq -e '[.[] | .outboundTag] == ["xraywrt-direct","proxy"]' <<<"$(own_rules)" >/dev/null || fail 'unqualified route precedes qualified route'
+jq -e '[.[] | .outboundTag] == ["direct","proxy"]' <<<"$(own_rules)" >/dev/null || fail 'unqualified route precedes qualified route'
 gen_rules direct-first $'domain:example.com core\ndomain:example.com;443;udp proxy\nfull:api.example.com;443;udp proxy'
 jq -e '[.[] | .domain] == [["full:api.example.com"]]' <<<"$(own_rules)" >/dev/null || fail 'legacy core shadows its same matcher but not overlapping different matchers'
 gen_rules direct-first 'regexp:^foo;bar$ proxy'
@@ -80,8 +80,8 @@ pass 'My rules: qualified sites use native tuple routing without DNS changes'
 # Interleaved blocks: a change of target starts a new rule and a new DNS entry, in line order.
 for mode in direct-first proxy-first; do
 	gen_rules "$mode" $'a.test direct\nb.test direct\nc.test proxy\nd.test pool\ne.test direct\n# comment\n\nf.test direct'
-	assert_eq '[{"domain":["domain:a.test","domain:b.test"],"outboundTag":"xraywrt-direct","ruleTag":"xraywrt-rule-1"},{"domain":["domain:c.test"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-2"},{"domain":["domain:d.test"],"balancerTag":"pool","ruleTag":"xraywrt-rule-3"},{"domain":["domain:e.test","domain:f.test"],"outboundTag":"xraywrt-direct","ruleTag":"xraywrt-rule-4"}]' "$(own_rules)" "$mode: runs become rules in line order"
-	jq -e '[.routing.rules[] | .ruleTag // empty] == ["xraywrt-rule-1","xraywrt-rule-2","xraywrt-rule-3","xraywrt-rule-4"]' <<<"$out" >/dev/null || fail "$mode: own rules are before the provider's"
+	assert_eq '[{"domain":["domain:a.test","domain:b.test"],"outboundTag":"direct","ruleTag":"xraywrt-rule-1"},{"domain":["domain:c.test"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-2"},{"domain":["domain:d.test"],"balancerTag":"pool","ruleTag":"xraywrt-rule-3"},{"domain":["domain:e.test","domain:f.test"],"outboundTag":"direct","ruleTag":"xraywrt-rule-4"}]' "$(own_rules)" "$mode: runs become rules in line order"
+	jq -e '[.routing.rules[] | .ruleTag // empty | select(endswith("-service") | not)] == ["xraywrt-rule-1","xraywrt-rule-2","xraywrt-rule-3","xraywrt-rule-4"]' <<<"$out" >/dev/null || fail "$mode: own rules are before the provider's"
 	core_test "$mode interleaved"
 done
 gen_rules direct-first $'a.test direct\nb.test direct\nc.test proxy\nd.test pool\ne.test direct'
@@ -209,13 +209,13 @@ prof_has 'warn My rules: line 4 "not a rule at all" ignored'
 prof_has 'warn My rules: line 5 "c.test proxy extra" ignored'
 prof_has 'warn My rules: line 8 "1.2.3.0/33 core" ignored'
 prof_has 'warn My rules: the targets gone, other are not in the configuration, their lines are skipped'
-assert_eq '[{"domain":["domain:a.test"],"outboundTag":"xraywrt-direct","ruleTag":"xraywrt-rule-1"}]' "$(own_rules)" 'only the lines with a target are used'
+assert_eq '[{"domain":["domain:a.test"],"outboundTag":"direct","ruleTag":"xraywrt-rule-1"}]' "$(own_rules)" 'only the lines with a target are used'
 pass 'My rules: bad lines and missing targets'
 
 # direct and core are reserved: a provider tag of that name is no target and never wins.
 src_json "{\"outbounds\":[{\"tag\":\"direct\",\"protocol\":\"vless\",\"settings\":{\"vnext\":[{\"address\":\"10.0.0.9\",\"port\":443,\"users\":[{\"id\":\"11111111-1111-1111-1111-111111111111\",\"encryption\":\"none\"}]}]}},{\"tag\":\"core\",\"protocol\":\"socks\",\"settings\":{\"servers\":[{\"address\":\"192.0.2.8\",\"port\":1}]}},$proxy_ob],\"routing\":{\"balancers\":[{\"tag\":\"core\",\"selector\":[\"proxy\"]}]},$sniffing}"
 gen_rules direct-first $'example.com direct\nexample.org core\nexample.net proxy'
-assert_eq '[{"domain":["domain:example.com"],"outboundTag":"xraywrt-direct","ruleTag":"xraywrt-rule-1"},{"domain":["domain:example.net"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-3"}]' "$(own_rules)" 'a provider outbound tagged direct (vless) is not the target of direct; core is no tag either'
+assert_eq '[{"domain":["domain:example.com"],"outboundTag":"direct","ruleTag":"xraywrt-rule-1"},{"domain":["domain:example.net"],"outboundTag":"proxy","ruleTag":"xraywrt-rule-3"}]' "$(own_rules)" 'provider outbound tagged direct is used; core is no tag'
 prof_has 'rules-target proxy'
 prof_lacks 'rules-target direct'
 prof_lacks 'rules-target core'

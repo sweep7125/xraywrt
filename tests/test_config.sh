@@ -215,11 +215,11 @@ assert_eq '' "$(cat "$tmpdir/events")" "unchanged no restart"
 src '.xraywrt = {"disable-quic": false}' >"$tmpdir/cand"
 assert_eq 'saved' "$(config_install "$tmpdir/cand" | xraywrt-json get action)" "provider-key-only change keeps the core"
 assert_eq $'cron\npolicy' "$(cat "$tmpdir/events")" "provider-key-only change applies profile without restart"
-# A provider mode flip changes the runtime (WAN DNS go direct in direct-first).
+# Both modes route the WAN DNS fallback directly, so this mode flip changes only policy.
 src '.xraywrt = {"mode": "direct-first"}' >"$tmpdir/cand"
 : >"$tmpdir/events"
 config_install "$tmpdir/cand" >/dev/null
-assert_eq $'restart\ncron\npolicy' "$(cat "$tmpdir/events")" "mode flip restarts the core and applies policy without DNS restart"
+assert_eq $'cron\npolicy' "$(cat "$tmpdir/events")" "mode flip applies policy without restarting the core or DNS"
 assert_eq direct-first "$(profile_get mode)" "provider key flips mode"
 # fakedns servers switch fake-IP on: the dnsmasq cache is flushed exactly once.
 src '.xraywrt = {"mode": "direct-first"} | .dns.servers = [{"address": "fakedns"}, "https://dns.example.com/dns-query"]' >"$tmpdir/cand"

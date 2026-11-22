@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.6
+
+- Add an optional Discord Voice detector for IPv4 in direct-first mode. It uses the existing Xray ingress and respects explicit bypass rules.
+- Add an option to suppress HTTPS and SVCB DNS records. Keep app-added WAN DNS direct and preserve the provider's explicit DNS routing.
+- Respect direct-device exceptions in both traffic modes, reuse unambiguous provider DIRECT and BLOCK outbounds, and keep stale FakeIP traffic from leaking to WAN.
+- Use proxy-first and leave optional traffic settings off when no setting or provider preference exists. Keep existing saved preferences.
+
 ## 0.1.5
 
 - Match provider and personal address rules by destination ports and TCP or UDP, including entries from cached lists. Qualified personal sites match traffic already intercepted and recognized by Xray.

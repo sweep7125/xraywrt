@@ -321,8 +321,8 @@ seq(async () => {
  };
  let opts = await renderSettings({ mode: 'direct-first', provider: { disable_quic: '0', mode: 'direct-first' } }, { netbird: true });
  // Spec 13 groups; every UCI option of the table that the UI edits sits in its group.
- const groups = { routing: ['source_network_interfaces', 'block_client_ipv6', 'disable_quic', 'bypass_ntp', 'netbird_proxy'],
-  dns: ['dns_hijack', '_dns_other', 'dns_raw_upstream', 'dns_raw_via'],
+ const groups = { routing: ['source_network_interfaces', 'block_client_ipv6', 'discord_voice', 'disable_quic', 'bypass_ntp', 'netbird_proxy'],
+  dns: ['dns_hijack', 'block_https_svcb', '_dns_other', 'dns_raw_upstream', 'dns_raw_via'],
   core: ['core_log_level', 'bypass_subscription_dns', '_boot'] };
  h.assert(!(await renderSettings({ mode: 'direct-first' }, {}, {})).bypass_subscription_dns, 'no direct subscription download option without a saved link');
  h.assert(!opts.subscription_auto_update && !opts._subscription_url, 'no duplicate subscription settings');
@@ -350,6 +350,8 @@ seq(async () => {
  h.assertEq(opts.dns_hijack.description, 'The router answers plain DNS requests, even to servers set on devices. Encrypted DNS (DoH/DoT) is not intercepted.', 'DNS caveat is explicit');
  h.assertEq(opts.netbird_proxy.description, 'Outbound NetBird connections are handed to the VPN, which applies your rules.', 'NetBird follows rules');
  h.assert(!opts.dns_forward_other_types, 'the old flag is replaced by one select');
+ h.assertEq(opts.block_https_svcb.default, '0', 'HTTPS/SVCB blocking defaults off');
+ h.assert(opts.block_https_svcb.description.includes('whole HTTPS and SVCB records, not only ECH'), 'whole-record warning');
  h.assert(!opts.dns_refuse_other_types, 'no refuse option (spec 7.5)');
  h.assert(!opts.fake_domains_source, 'fake-IP source belongs on Lists');
  h.assertEq(opts.core_log_level.default, 'warning', 'core log level default');
@@ -366,6 +368,22 @@ seq(async () => {
  opts = await renderSettings({ mode: 'direct-first', provider: { disable_quic: '0', mode: 'direct-first' } });
 
 
+ opts = await renderSettings({ mode: 'direct-first', provider: { discord_voice: '1' } });
+ h.assertEq(opts.discord_voice.cfgvalue(), 'provider', 'Discord Voice follows provider');
+ opts.discord_voice.write('settings', '0');
+ h.assert(overrides.includes('discord_voice'), 'Discord Voice explicit off overrides provider');
+ opts.discord_voice.write('settings', 'provider');
+ h.assert(!overrides.includes('discord_voice'), 'Discord Voice can return to provider');
+ opts = await renderSettings({ mode: 'proxy-first', provider: { discord_voice: '1' } });
+ h.assertEq(opts.discord_voice.cfgvalue(), 'provider', 'proxy-first preserves provider preference');
+ opts = await renderSettings({ mode: 'direct-first', provider: { block_https_svcb: '1' } });
+ h.assertEq(opts.block_https_svcb.cfgvalue(), 'provider', 'HTTPS/SVCB follows provider');
+ opts.block_https_svcb.write('settings', '0');
+ h.assertEq(ownSettings.block_https_svcb, '0', 'HTTPS/SVCB explicit off is saved');
+ h.assert(overrides.includes('block_https_svcb'), 'HTTPS/SVCB explicit off overrides provider');
+ opts.block_https_svcb.write('settings', 'provider');
+ h.assert(!overrides.includes('block_https_svcb'), 'HTTPS/SVCB can return to provider');
+
  // One select over dns_forward_other_types, dns_raw_via and dns_raw_upstream.
  let removedUpstream = 0;
  const optionRemove = Option.prototype.remove;
@@ -380,7 +398,7 @@ seq(async () => {
  const dfProvider = (v) => ({ mode: 'direct-first', provider: { [flagKey]: v } });
  opts = await dnsOther({ mode: 'direct-first' });
  h.assertEq(opts._dns_other.title, 'Other DNS query types (TXT, SRV, MX…)', 'select title');
- h.assertEq(opts._dns_other.description, 'Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Direct forwarding exposes these queries to your internet provider.', 'privacy warning wraps in description');
+ h.assertEq(opts._dns_other.description, 'Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Raw forwarding sends ordinary DNS to an IP:port, not DoH. Direct forwarding exposes these queries to your internet provider.', 'privacy warning wraps in description');
  h.assertEq(JSON.stringify(opts._dns_other.values), '[["off","Do not forward"],["direct","Forward directly"],["via","Forward through the VPN"]]', 'short direct-first choices');
 
 
@@ -630,9 +648,9 @@ seq(async () => {
  h.assert(!texts(rulesWidget).some(t => t.startsWith('The tags')), 'no reserved note without such tags');
  // The device list of each mode follows the mode select, also before saving.
  h.assertEq(JSON.stringify(opts._src.dependencies), '[["mode","direct-first"],["mode","provider"]]', 'devices via VPN: direct-first, or the configuration when it is direct-first');
- h.assertEq(JSON.stringify(opts._direct_src.dependencies), '[["mode","proxy-first"]]', 'devices always direct: proxy-first only');
+ h.assertEq(JSON.stringify(opts._direct_src.dependencies), '[]', 'devices always direct in both modes');
  const providerProxy = await renderLists({ mode: 'proxy-first', provider: { mode: 'proxy-first' } });
- h.assertEq(JSON.stringify(providerProxy._direct_src.dependencies), '[["mode","proxy-first"],["mode","provider"]]', 'devices always direct follow a proxy-first configuration');
+ h.assertEq(JSON.stringify(providerProxy._direct_src.dependencies), '[]', 'devices always direct with provider mode');
  h.assertEq(JSON.stringify(providerProxy._src.dependencies), '[["mode","direct-first"]]', 'devices via VPN do not follow a proxy-first configuration');
  const proxyFirstLists = await renderLists({ mode: 'proxy-first', provider: {}, lists: {} });
  h.assertEq(proxyFirstLists.mode.description, 'Everything goes via VPN except the addresses and devices below.', 'proxy-first meaning is the description');
@@ -1634,11 +1652,11 @@ seq(async () => {
   h.assertEq(o.cfgvalue('settings'), 'none', 'saved own log value without provider');
   h.assertEq(o.values.map(v => v[0]).join(','), 'none,error,warning,info,debug', 'plain log choices unchanged');
  });
- await checkSettings('existing four defaults stay on', async () => {
+ await checkSettings('routing defaults are off', async () => {
   const t = settingsSetup(); await t.render();
   for (const name of ['dns_hijack', 'disable_quic', 'bypass_ntp']) {
    const o = t.tv.map.options[name];
-   h.assertEq(o.default, '1', name + ' default stays on');
+   h.assertEq(o.default, '0', name + ' default is off');
    h.assertEq(o.rmempty, false, name + ' explicit on stays saved');
   }
  });
@@ -1860,7 +1878,7 @@ seq(async () => {
  });
  await checkSettings('lists interval presets and custom saved value', async () => {
   const t = setup(); await t.render();
-  h.assertEq(t.tv.map.options.lists_interval.cfgvalue('settings'), '24', 'unset interval matches backend default');
+  h.assertEq(t.tv.map.options.lists_interval.cfgvalue('settings'), '0', 'unset interval matches backend default');
   t.settings.lists_interval = '5'; await t.render();
   let o = t.tv.map.options.lists_interval;
   h.assertEq(o.tab, null, 'interval on Traffic');
@@ -2241,7 +2259,7 @@ seq(async () => {
  h.assert(!t.includes('Core source') && t.includes('Version 0.8.0 · core v1.19.32'), 'Home shows the core version, not its source');
  for (const w of ['Server "Fast" is not in the configuration; "Main" is used.', 'The subscription setting "foo" is unknown or invalid and was ignored.',
   'In the "Only selected sites via VPN" mode no sites are chosen: only the addresses of the subscription and of My rules go via VPN. Add sites to My rules on the What goes via VPN page.', 'fake_domains.txt: bad line',
-  'No VPN DNS is configured: the DNS servers of the internet connection (WAN) are used.',
+  'No VPN DNS is configured: the DNS servers of the internet connection (WAN) are used directly.',
   'Inbound tun-in (tun) was removed: the router uses TPROXY.',
   'The "fakedns" section of the configuration is replaced by the one XrayWRT generates.',
   'The outbound "proxy" had the mark 255; XrayWRT replaced it with 1.',

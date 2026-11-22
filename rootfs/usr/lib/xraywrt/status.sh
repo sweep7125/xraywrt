@@ -85,6 +85,11 @@ config_valid_json() {
 # Profile warnings for the Overview (spec 15): `warn`, `ignored` and a
 # direct-first config without fake-IP domains (spec 7.2).
 status_warnings() {
+	if [ "${DISCORD_VOICE:-0}" = 1 ] && [ "${POLICY_MODE:-}" = direct-first ] &&
+		{ [ "$(status_file_read "$NFT_APPLIED_FILE.discord_voice")" != 1 ] || ! nft_active; }; then
+		code_message discord_voice_accounting 'Discord Voice inactive: enable conntrack accounting if needed (nf_conntrack_acct=1) and reload XrayWRT.'
+		printf '\n'
+	fi
 	if [ -n "${DNS_RAW_LOST:-}${DNS_RAW_VIA:-}" ]; then
 		code_message dns_raw_lost 'Forwarding of other DNS query types was turned off because its outbound became unavailable. Choose an outbound in Advanced DNS to re-enable it, or leave forwarding off.'
 		printf '\n'

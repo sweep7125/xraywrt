@@ -195,6 +195,55 @@ render() {
 	nft_render "$out" "$tmpdir/work"
 }
 
+# A single apply must hash the same accounting snapshot that it renders.
+(
+ DISCORD_VOICE=1 POLICY_MODE=direct-first
+ mkdir -p "$ROUTE_PROC_ROOT/sys/net/netfilter"
+ echo 0 >"$ROUTE_PROC_ROOT/sys/net/netfilter/nf_conntrack_acct"
+ before="$(nft_input_hash)"
+ echo 1 >"$ROUTE_PROC_ROOT/sys/net/netfilter/nf_conntrack_acct"
+ after="$(nft_input_hash)"
+ [ "$before" != "$after" ] || fail 'accounting changes nft input fingerprint'
+ DISCORD_ACCOUNTING=0
+ assert_eq "$before" "$(nft_input_hash)" 'fingerprint uses captured accounting state'
+ render
+ assert_file_not_contains "$out" 'ct original packets 1' 'renderer uses same captured accounting state'
+)
+pass 'Discord Voice readiness is fingerprinted consistently'
+
+# The classifier is default-off and follows explicit policy decisions.
+(
+ DISCORD_VOICE=0
+ DISABLE_QUIC=1
+ render
+ assert_file_not_contains "$out" 'ct original packets 1' 'Discord Voice is off by default'
+ assert_file_not_contains "$out" 'ct mark & 0x01000000' 'Discord continuation is off by default'
+ DISCORD_VOICE=1
+ mkdir -p "$ROUTE_PROC_ROOT/sys/net/netfilter"
+ echo 1 >"$ROUTE_PROC_ROOT/sys/net/netfilter/nf_conntrack_acct"
+ render
+ assert_file_not_contains "$out" '192.168.1.232' 'detector has no trial client'
+ assert_file_contains "$out" 'meta nfproto ipv4 meta mark' 'detector is IPv4 scoped'
+ assert_file_contains "$out" 'ct original packets 1' 'classifier detects first packet'
+ assert_file_contains "$out" 'udp dport { 19294-19344, 50000-50099 } ct direction original ct original packets 1 udp length 82 @th,64,32 0x00010046 @th,128,128 0x0 @th,256,128 0x0 @th,384,128 0x0 @th,512,128 0x0 ct mark set ct mark | 0x01000000' 'classifier requires exact port ranges and discovery signature'
+ assert_file_contains "$out" 'udp dport { 19294-19344, 50000-50099 } ct direction original ct mark & 0x01000000 == 0x01000000' 'marked continuation requires exact port ranges'
+ foreign_mark=0x00020000
+ assert_eq 0 "$((foreign_mark & NFT_DISCORD_VOICE_CT_MARK))" 'different foreign conntrack mark does not admit continuation'
+ assert_eq "$((foreign_mark))" "$(((foreign_mark | NFT_DISCORD_VOICE_CT_MARK) & foreign_mark))" 'recognition preserves foreign conntrack mark'
+ NFT_INTERCEPT_MARK=0x10000000 render
+ assert_file_contains "$out" 'meta mark & 0x10000000 == 0 meta l4proto udp udp dport { 19294-19344, 50000-50099 } ct direction original ct original packets 1' 'classifier uses shared intercept mark'
+ assert_file_contains "$out" 'meta mark & 0x10000000 == 0 meta l4proto udp udp dport { 19294-19344, 50000-50099 } ct direction original ct mark & 0x01000000' 'continuation uses shared intercept mark'
+ awk '/prerouting_policy ip daddr @direct_dst return/ { personal = NR } /ct original packets 1/ { detector = NR } /prerouting_policy .*udp dport 443 meta mark set/ { quic = NR } END { exit !(personal && personal < detector && detector < quic) }' "$out"
+ echo 0 >"$ROUTE_PROC_ROOT/sys/net/netfilter/nf_conntrack_acct"
+ render
+ assert_file_not_contains "$out" 'ct original packets 1' 'missing accounting skips only detector'
+ POLICY_MODE=proxy-first
+ render
+ assert_file_not_contains "$out" 'ct original packets 1' 'proxy-first is unchanged'
+ assert_file_not_contains "$out" 'ct mark & 0x01000000' 'proxy-first excludes continuation'
+)
+pass 'Discord Voice scope, ordering, accounting and off state'
+
 # Full render keeps each provider selector in its address family and mode.
 (
  PROFILE_FILE="$tmpdir/selector-profile"
@@ -242,10 +291,10 @@ test_ordered_personal_addresses() {
    fi
   done
   if [ "$POLICY_MODE" = proxy-first ]; then
-   assert_true 'a personal core or tag returns to the direct-device bypass' awk '
+   assert_true 'direct-device bypass precedes personal rules' awk '
     $5 == "prerouting_policy" && /jump personal_addresses/ { own = NR }
-    $5 == "prerouting_policy" && /ip6 saddr @direct_src6 return/ { dev = NR }
-    END { exit !(own && dev > own) }' "$out"
+    $5 == "prerouting_policy" && /ip6 saddr @direct_src6 goto direct_device_policy/ { dev = NR }
+    END { exit !(own && dev && dev < own) }' "$out"
   fi
  done
 }
@@ -400,12 +449,12 @@ add rule inet xraywrt dns_hijack iifname @source_ifaces ip6 daddr != @localv6 me
    nft_render "$tmpdir/resolve.nft" "$work"
    case "$POLICY_MODE" in
     proxy-first) expected=$'direct\ndirect_src' ;;
-    direct-first) expected=$'dst\nsrc\ndirect' ;;
+    direct-first) expected=$'dst\nsrc\ndirect\ndirect_src' ;;
    esac
    assert_eq "$expected" "$(cat "$tmpdir/resolved-kinds")" "$POLICY_MODE skips inactive lists ($DNS_MODE)"
   done
  done
- pass 'proxy-first skips dst src; direct-first skips direct_src'
+ pass 'proxy-first skips dst src; direct-first resolves direct devices'
 )
 
 # Goldens captured before selective resolution, with inactive lists empty.
@@ -438,6 +487,7 @@ add rule inet xraywrt dns_hijack iifname @source_ifaces ip6 daddr != @localv6 me
  : >"$DIRECT_SRC_LIST_FILE"
 )
 
+DISABLE_QUIC=1 DNS_HIJACK=1 BYPASS_NTP=1 BYPASS_SUBSCRIPTION_DNS=1
 render
 assert_file_contains "$out" 'localv4 { 203.0.113.0/24 }' 'sets filled: connected v4'
 for prefix in 2001:db8:1::/48 2001:db8:1:10::/64 2001:db8:1:20::/64; do
@@ -559,9 +609,9 @@ assert_eq $'add table inet xraywrt\ndelete table inet xraywrt\nadd table inet xr
 assert_file_contains "$out" 'meta nfproto ipv6 udp dport 123 return' "IPv6 NTP bypass"
 assert_file_contains "$out" 'ip daddr != 198.18.0.0/15 udp dport 123 return' "fake-IP NTP intercepted"
 assert_false "no unconditional NTP bypass" grep -Eq '^add rule .* (prerouting_policy|mangle_output) udp dport 123 return$' "$out"
-assert_file_contains "$out" 'ip saddr @direct_src return' "direct devices bypass"
-assert_file_contains "$out" 'ip6 saddr @direct_src6 return' "IPv6 direct devices bypass"
-a=$(grep -n 'prerouting_policy ip saddr @direct_src return' "$out" | cut -d: -f1)
+assert_file_contains "$out" 'ip saddr @direct_src goto direct_device_policy' "direct devices bypass"
+assert_file_contains "$out" 'ip6 saddr @direct_src6 goto direct_device_policy' "IPv6 direct devices bypass"
+a=$(grep -n 'prerouting_policy ip saddr @direct_src goto direct_device_policy' "$out" | cut -d: -f1)
 b=$(grep -n 'prerouting_policy meta l4proto { tcp, udp } meta mark set' "$out" | cut -d: -f1)
 assert_true "device return precedes catch-all" test "$a" -lt "$b"
 DNS_MODE=fake-ip
@@ -603,7 +653,7 @@ DNS_MODE=redir-host
 printf 'aa:bb:cc:dd:ee:ff\n' >"$DIRECT_SRC_LIST_FILE"
 render
 assert_file_contains "$out" 'add element inet xraywrt direct_src_mac { aa:bb:cc:dd:ee:ff }' 'direct MAC element'
-a=$(grep -n 'prerouting_policy ether saddr @direct_src_mac return' "$out" | cut -d: -f1)
+a=$(grep -n 'prerouting_policy ether saddr @direct_src_mac goto direct_device_policy' "$out" | cut -d: -f1)
 b=$(grep -n 'prerouting_policy meta l4proto { tcp, udp } meta mark set' "$out" | cut -d: -f1)
 assert_true 'MAC return precedes catch-all' test "$a" -lt "$b"
 # Use the external binary: nft() above is an apply spy.
@@ -618,8 +668,7 @@ assert_file_contains "$out" 'ether saddr @direct_src_mac goto direct_device_poli
 pass 'MAC device nft rules'
 
 # Spec 8: the direct listener serves fake-IP direct devices in direct-first too.
-# Only their fake-IPs are diverted (jump, after the proxy lists); real IPs keep
-# direct-first list interception, as before the direct listener.
+# Device bypass precedes proxy and personal rules in both DNS styles.
 (
  POLICY_MODE=direct-first
  DNS_MODE=fake-ip
@@ -629,21 +678,20 @@ pass 'MAC device nft rules'
  render
  assert_file_contains "$out" 'add element inet xraywrt direct_src_mac { aa:bb:cc:dd:ee:ff }' 'direct-first direct MAC element'
  assert_file_contains "$out" 'add element inet xraywrt direct_src { 192.168.1.60 }' 'direct-first direct IPv4 element'
- assert_file_contains "$out" 'prerouting_policy ether saddr @direct_src_mac jump direct_device_policy' 'direct-first direct MAC device fake-IP split'
- assert_file_contains "$out" 'prerouting_policy ip saddr @direct_src jump direct_device_policy' 'direct-first direct IPv4 device fake-IP split'
- assert_file_not_contains "$out" 'goto direct_device_policy' 'direct-first never skips the remaining policy for real IPs'
+ assert_file_contains "$out" 'prerouting_policy ether saddr @direct_src_mac goto direct_device_policy' 'direct-first direct MAC device fake-IP split'
+ assert_file_contains "$out" 'prerouting_policy ip saddr @direct_src goto direct_device_policy' 'direct-first direct IPv4 device fake-IP split'
  assert_file_contains "$out" 'direct_device_policy ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } meta mark set meta mark | 0x08000000 | 0x04000000 accept' 'direct-first fake-IP direct mark'
  assert_file_contains "$out" 'proxy_redirect meta mark & 0x04000000 == 0x04000000 meta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:7895 accept' 'direct-first direct listener TPROXY'
- a=$(grep -n 'prerouting_policy ether saddr @direct_src_mac jump direct_device_policy' "$out" | cut -d: -f1)
+ a=$(grep -n 'prerouting_policy ether saddr @direct_src_mac goto direct_device_policy' "$out" | cut -d: -f1)
  b=$(grep -n 'prerouting_policy ip saddr @proxy_src ' "$out" | head -n1 | cut -d: -f1)
  c=$(grep -n 'prerouting_policy ip daddr 198.18.0.0/15 meta l4proto' "$out" | cut -d: -f1)
- assert_true 'proxy lists still mark direct devices first' test "$b" -lt "$a"
+ assert_true 'direct devices bypass proxy lists' test "$a" -lt "$b"
  assert_true 'direct devices precede the fake-IP mark' test "$a" -lt "$c"
  DNS_MODE=redir-host
  DIRECT_LISTENER=0
  render
- assert_file_not_contains "$out" 'direct_device_policy' 'direct-first without fake-IP has no direct device split'
- assert_file_not_contains "$out" 'saddr @direct_src' 'direct-first without fake-IP leaves direct devices to the default'
+ assert_file_contains "$out" 'direct_device_policy ip daddr 198.18.0.0/15 reject' 'direct-first redir-host rejects stale fake-IP'
+ assert_file_contains "$out" 'prerouting_policy ip saddr @direct_src goto direct_device_policy' 'direct-first real-IP devices bypass proxy lists'
 )
 pass 'direct-first fake-IP direct devices'
 

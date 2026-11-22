@@ -45,7 +45,8 @@
         "destOverride": [
           "fakedns"
         ],
-        "enabled": true
+        "enabled": true,
+        "routeOnly": true
       },
       "streamSettings": {
         "sockopt": {
@@ -66,7 +67,8 @@
         "destOverride": [
           "fakedns"
         ],
-        "enabled": true
+        "enabled": true,
+        "routeOnly": true
       },
       "streamSettings": {
         "sockopt": {
@@ -87,7 +89,8 @@
         "destOverride": [
           "fakedns"
         ],
-        "enabled": true
+        "enabled": true,
+        "routeOnly": true
       },
       "streamSettings": {
         "sockopt": {
@@ -245,7 +248,7 @@
         "inboundTag": [
           "xraywrt-fakeip-direct"
         ],
-        "outboundTag": "xraywrt-direct"
+        "outboundTag": "direct"
       },
       {
         "domain": [

@@ -29,7 +29,7 @@ printf 'nameserver 192.0.2.53\n' >"$DNS_AUTO_RESOLVFILE"
   assert_eq lan-socks "$(jq -r '.inbounds[0].tag' "$out")" "$mode provider inbound kept"
   assert_false "$mode no inbound warning" grep -q inbound "$tmpdir/warnings"
   assert_eq 3 "$(jq '[.routing.rules[].inboundTag == ["xraywrt-fakeip-direct"]] | index(true)' "$out")" "$mode direct rule follows the fake-IP block rule"
-  assert_eq xraywrt-direct "$(jq -r '.routing.rules[3].outboundTag' "$out")" "$mode direct devices go direct"
+  assert_eq direct "$(jq -r '.routing.rules[3].outboundTag' "$out")" "$mode direct devices go direct"
   assert_eq '{"domain":["geosite:netflix"],"outboundTag":"proxy"}' "$(jq -c '.routing.rules[4]' "$out")" "$mode provider rules follow"
   cp "$FX/src/single.json" "$src"
   xray_config_generate "$src" "$out"
@@ -55,7 +55,8 @@ assert_file_contains "$out" 'add element inet xraywrt direct_src_mac { aa:bb:cc:
 expected="add rule inet xraywrt direct_device_policy meta nfproto ipv6 return
 add rule inet xraywrt direct_device_policy ip daddr != $FAKEIP_RANGE return
 add rule inet xraywrt direct_device_policy ip daddr $FAKEIP_RANGE udp dport 443 reject
-add rule inet xraywrt direct_device_policy ip daddr $FAKEIP_RANGE meta l4proto { tcp, udp } meta mark set meta mark | $NFT_INTERCEPT_MARK | $NFT_DIRECT_MARK accept"
+add rule inet xraywrt direct_device_policy ip daddr $FAKEIP_RANGE meta l4proto { tcp, udp } meta mark set meta mark | $NFT_INTERCEPT_MARK | $NFT_DIRECT_MARK accept
+add rule inet xraywrt direct_device_policy ip daddr $FAKEIP_RANGE reject"
 assert_eq "$expected" "$(grep '^add rule inet xraywrt direct_device_policy ' "$out")" 'real destinations return, fake QUIC rejects before direct marking'
 first="$(grep '^add rule inet xraywrt proxy_redirect ' "$out" | sed -n '2p')"
 assert_eq "add rule inet xraywrt proxy_redirect meta mark & $NFT_DIRECT_MARK == $NFT_DIRECT_MARK meta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:$XRAY_DIRECT_TPROXY_PORT accept" "$first" 'dedicated TPROXY terminates before generic TPROXY'
@@ -63,15 +64,27 @@ assert_file_not_contains "$out" 'mangle_output meta mark & 0x04000000' 'router o
 DISABLE_QUIC=0
 nft_render "$out" "$tmpdir/work"
 assert_file_not_contains "$out" 'udp dport 443 reject' 'fake direct QUIC allowed when disabled'
+for POLICY_MODE in direct-first proxy-first; do
+ for DNS_MODE in fake-ip redir-host; do
+  DIRECT_LISTENER=1
+  nft_render "$out" "$tmpdir/work"
+  for match in 'ether saddr @direct_src_mac' 'ip saddr @direct_src' 'ip6 saddr @direct_src6' 'ip saddr { 192.0.2.3 } meta l4proto { tcp, udp } th dport { 80,443 }' 'ip6 saddr { 2001:db8::3 } meta l4proto { tcp, udp } th dport { 443 }' 'meta nfproto ipv4 meta l4proto { tcp, udp } th dport { 8080 }'; do
+   assert_file_contains "$out" "prerouting_policy $match goto direct_device_policy" "$POLICY_MODE/$DNS_MODE direct device form: $match"
+  done
+ done
+done
+DNS_MODE=fake-ip
+POLICY_MODE=proxy-first
 pass 'fake-IP direct devices nft policy'
 
 DIRECT_LISTENER=0
 nft_render "$out" "$tmpdir/work"
-assert_file_not_contains "$out" direct_device_policy 'no fake-IP direct chain without listener'
+assert_file_contains "$out" "direct_device_policy ip daddr $FAKEIP_RANGE reject" 'fake-IP without direct listener fails closed'
 assert_file_not_contains "$out" "127.0.0.1:$XRAY_DIRECT_TPROXY_PORT" 'no dedicated TPROXY without listener'
-assert_file_not_contains "$out" 'prerouting_policy ether saddr @direct_src' 'fake-IP direct devices skipped without listener'
-assert_file_not_contains "$out" 'add element inet xraywrt direct_src' 'no direct source sets populated without listener'
-assert_file_contains "$out" "prerouting_policy meta l4proto { tcp, udp } meta mark set" 'fallback keeps generic fake-IP interception'
+assert_file_contains "$out" 'prerouting_policy ether saddr @direct_src_mac goto direct_device_policy' 'direct device still bypasses real-IP capture'
+DNS_MODE=redir-host
+nft_render "$out" "$tmpdir/work"
+assert_file_contains "$out" "direct_device_policy ip daddr $FAKEIP_RANGE reject" 'stale fake-IP cannot escape through new bypass in redir-host'
 printf 'profile-schema 1\nfake-enabled 1\nmode proxy-first\nfake-domains 3\n' >"$PROFILE_FILE"
 settings_load
 assert_eq 'fake-ip:1' "$DNS_MODE:$DIRECT_LISTENER" 'settings loads the listener with fakedns domains'

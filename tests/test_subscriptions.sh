@@ -175,6 +175,9 @@ uci add_list xraywrt.settings.balancer_override=main=node-a
 printf '192.0.2.1 core\nexample.org direct\n' >"$RULES_FILE"
 subscription_option_set "$a" profile P1
 
+uci_set block_https_svcb 1
+uci_set discord_voice 1
+
 # --- switch A -> B: B has no geodata yet, so it is downloaded; A's goes to its directory
 : >"$fetches"
 out="$(subscription_use "$b")"
@@ -190,7 +193,9 @@ assert_false 'the active one has no parked copy' test -e "$XRAY_SUBS_DIR/$b"
 assert_false 'no journal left' test -e "$XRAY_SUBS_DIR/.switch"
 assert_eq 'Title b' "$(jq -r '.profile_title' "$SUBSCRIPTION_META_FILE")" "B's metadata is live"
 assert_eq 'OWN:LINK' "$(cat "$XRAY_SHARE_DIR/own.dat"):$(cat "$XRAY_SHARE_DIR/link.dat")" 'own rule databases stay in place'
-assert_eq 'proxy-first:1' "$(uci_get mode):$(uci_get dns_hijack)" 'a new subscription starts with default settings'
+assert_eq 0 "$(uci_get discord_voice)" 'new subscription defaults Discord Voice off'
+assert_eq 0 "$(uci_get block_https_svcb)" 'new subscription defaults HTTPS/SVCB opt-in off'
+assert_eq 'proxy-first:0' "$(uci_get mode):$(uci_get dns_hijack)" 'a new subscription starts with default settings'
 assert_eq '' "$(uci_get provider_override)$(uci_get balancer_override)" 'no overrides for B'
 assert_eq '' "$(cat "$RULES_FILE")" 'empty My rules for B'
 assert_eq 'direct-first:0:mode:main=node-a' "$(subscription_option "$a" mode):$(subscription_option "$a" dns_hijack):$(subscription_option "$a" provider_override):$(subscription_option "$a" balancer_override)" "A's settings are kept in its section"
@@ -204,6 +209,8 @@ printf '10.0.0.1 core\n' >"$RULES_FILE"
 subscription_use "$a" >/dev/null
 assert_eq '' "$(cat "$fetches")" 'switching back fetches nothing'
 cmp -s "$XRAY_CONFIG" "$bodies/a" || fail 'A installed again'
+assert_eq 1 "$(uci_get discord_voice)" 'switch back restores Discord Voice'
+assert_eq 1 "$(uci_get block_https_svcb)" 'switch back restores HTTPS/SVCB opt-in'
 share_has geosite.dat a
 share_has geoip.dat a
 assert_eq "https://geo.example.com/b/geosite.dat" "$(cat "$XRAY_SUBS_DIR/$b/share/geosite.dat")" "B's same-named file is parked, not mixed up"
@@ -458,7 +465,8 @@ for loss in kill power; do
 	crash_switch "$b" precommit
 	assert_true "$loss: the journal survives the crash" test -f "$XRAY_SUBS_DIR/.switch"
 	assert_eq parked "$(cut -d' ' -f3 "$XRAY_SUBS_DIR/.switch")" "$loss: the crash came after the copy of A"
-	assert_eq 'proxy-first:1' "$(uci_get mode):$(uci_get dns_hijack)" "$loss: the staged defaults of B are in place"
+	assert_eq 0 "$(uci_get block_https_svcb)" 'new subscription defaults HTTPS/SVCB opt-in off'
+assert_eq 'proxy-first:0' "$(uci_get mode):$(uci_get dns_hijack)" "$loss: the staged defaults of B are in place"
 	[ "$loss" != power ] || uci revert xraywrt
 	subscription_recover
 	assert_eq "$a" "$(uci_get subscription)" "$loss: A stays active"

@@ -60,7 +60,7 @@ lists_apply - - - >/dev/null
 [ "$(wc -l <"$test_root/renders")" -eq 1 ]
 case "$scenario" in
 list) printf '8.8.8.8 core\n' >"$RULES_FILE" ;;
-setting) settings_load() { DISABLE_QUIC=0; } ;;
+setting) settings_load() { DISABLE_QUIC=1; } ;;
 profile) printf 'has proxy-ips\nproxy-ip 8.8.8.8;443\n' >>"$PROFILE_FILE" ;;
 remote)
  printf 'https://example.org/list core\n' >"$RULES_FILE"

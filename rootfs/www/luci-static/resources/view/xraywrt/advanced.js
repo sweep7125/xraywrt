@@ -34,7 +34,7 @@ return view.extend({
 		s.tab('core', _('Service'));
 
 		// Flags with a default must stay in UCI: form.Flag removes empty values.
-		const flag = (tab, name, title, description, defaultValue = '1') => api.providerScalar(this.profile, form.ListValue, name, (Type = form.Flag) => {
+		const flag = (tab, name, title, description, defaultValue = '0') => api.providerScalar(this.profile, form.ListValue, name, (Type = form.Flag) => {
 			const f = s.taboption(tab, Type, name, title, description);
 			if (Type === form.ListValue) {
 				f.value('1', _('Enabled'));
@@ -54,6 +54,7 @@ return view.extend({
 			: _('Keep external IPv6 of client devices from reaching the internet without the VPN.'), '0');
 		if (proxyFirst)
 			ipv6Flag.readonly = true;
+		flag('routing', 'discord_voice', _('Discord Voice'), _('Send recognized Discord Voice traffic through Xray in direct-first mode. Requires conntrack accounting.'));
 		flag('routing', 'disable_quic', _('Block QUIC for VPN traffic'), _('Disables HTTP/3 so sites work more reliably through the VPN.'));
 		flag('routing', 'bypass_ntp', _('Time sync without Xray'), _('Time sync (NTP) works even when the VPN is down.'));
 		// Only for routers that have NetBird (or already use the option).
@@ -65,13 +66,14 @@ return view.extend({
 
 		// DNS
 		flag('dns', 'dns_hijack', _('Redirect client DNS to the router'), _('The router answers plain DNS requests, even to servers set on devices. Encrypted DNS (DoH/DoT) is not intercepted.'));
+		flag('dns', 'block_https_svcb', _('Do not forward HTTPS/SVCB'), _('Returns empty answers for whole HTTPS and SVCB records, not only ECH, when forwarding other DNS query types. When disabled, bare FakeDNS still blocks HTTPS/SVCB; scoped FakeDNS still blocks raw queries for matching names.'), '0');
 		// One control over three UCI keys (dns_forward_other_types, dns_raw_via, dns_raw_upstream); only this select is shown for the flag.
 		// A non-empty dns_raw_via forwards in both modes; the flag only in direct-first.
 		const forwardKey = 'dns_forward_other_types';
 		const providerForward = (this.profile.provider || {})[forwardKey];
 		const providerForwardsDirectly = providerForward === '1' && !proxyFirst;
 		const lostTag = this.profile.dns_raw_lost || '';
-		const other = s.taboption('dns', form.ListValue, '_dns_other', _('Other DNS query types (TXT, SRV, MX…)'), _('Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Direct forwarding exposes these queries to your internet provider.'));
+		const other = s.taboption('dns', form.ListValue, '_dns_other', _('Other DNS query types (TXT, SRV, MX…)'), _('Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Raw forwarding sends ordinary DNS to an IP:port, not DoH. Direct forwarding exposes these queries to your internet provider.'));
 		if (lostTag) {
 			// LuCI descriptions accept strings only; render the text-only warning beside the widget.
 			const renderOther = other.renderWidget;

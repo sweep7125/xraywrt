@@ -135,7 +135,8 @@
         "destOverride": [
           "fakedns"
         ],
-        "enabled": true
+        "enabled": true,
+        "routeOnly": true
       },
       "streamSettings": {
         "sockopt": {
@@ -277,7 +278,8 @@
           "xraywrt-dns-internal"
         ],
         "ip": [
-          "127.0.0.1"
+          "127.0.0.1",
+          "192.0.2.53"
         ],
         "outboundTag": "xraywrt-direct",
         "port": 53
@@ -292,7 +294,7 @@
         "inboundTag": [
           "xraywrt-fakeip-direct"
         ],
-        "outboundTag": "xraywrt-direct"
+        "outboundTag": "direct"
       },
       {
         "domain": [

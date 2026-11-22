@@ -37,8 +37,6 @@ add element inet xraywrt direct_src { 192.168.1.50 }
 add element inet xraywrt direct_src6 { fd00::50 }
 add rule inet xraywrt dns_hijack iifname "wt0" return
 add rule inet xraywrt dns_hijack fib daddr type local return
-add rule inet xraywrt dns_hijack iifname @source_ifaces ip daddr != @localv4 meta l4proto { tcp, udp } th dport 53 redirect to :53
-add rule inet xraywrt dns_hijack iifname @source_ifaces ip6 daddr != @localv6 meta l4proto { tcp, udp } th dport 53 redirect to :53
 add rule inet xraywrt mangle_prerouting iifname "wt0" return
 add rule inet xraywrt mangle_prerouting iifname @source_ifaces jump prerouting_policy
 add rule inet xraywrt prerouting_policy ct direction reply return
@@ -46,15 +44,15 @@ add rule inet xraywrt prerouting_policy fib daddr type local return
 add rule inet xraywrt prerouting_policy ip daddr @localv4 return
 add rule inet xraywrt prerouting_policy ip6 daddr @localv6 return
 add rule inet xraywrt prerouting_policy meta mark & 0x08000000 == 0x08000000 return
-add rule inet xraywrt prerouting_policy meta nfproto ipv6 udp dport 123 return
-add rule inet xraywrt prerouting_policy ip daddr != 198.18.0.0/15 udp dport 123 return
-add rule inet xraywrt prerouting_policy meta l4proto { tcp, udp } th dport 53 return
+add chain inet xraywrt direct_device_policy
+add rule inet xraywrt direct_device_policy meta nfproto ipv6 return
+add rule inet xraywrt direct_device_policy ip daddr != 198.18.0.0/15 return
+add rule inet xraywrt direct_device_policy ip daddr 198.18.0.0/15 reject
+add rule inet xraywrt prerouting_policy ip saddr @direct_src goto direct_device_policy
+add rule inet xraywrt prerouting_policy ip6 saddr @direct_src6 goto direct_device_policy
 add rule inet xraywrt prerouting_policy ip daddr @direct_dst return
 add rule inet xraywrt prerouting_policy ip6 daddr @direct_dst6 return
-add rule inet xraywrt prerouting_policy ip saddr @direct_src return
-add rule inet xraywrt prerouting_policy ip6 saddr @direct_src6 return
 add rule inet xraywrt prerouting_policy meta l4proto { tcp, udp } meta mark set meta mark | 0x08000000
-add rule inet xraywrt prerouting_policy meta mark & 0x08000000 == 0x08000000 udp dport 443 meta mark set meta mark ^ 0x08000000 reject
 add rule inet xraywrt proxy_redirect iifname "wt0" return
 add rule inet xraywrt proxy_redirect meta mark & 0x08000000 == 0x08000000 meta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:7894
 add rule inet xraywrt proxy_redirect meta mark & 0x08000000 == 0x08000000 meta nfproto ipv6 meta l4proto { tcp, udp } tproxy ip6 to [::1]:7894
@@ -65,8 +63,6 @@ add rule inet xraywrt mangle_output fib daddr type local return
 add rule inet xraywrt mangle_output ip daddr @localv4 return
 add rule inet xraywrt mangle_output ip6 daddr @localv6 return
 add rule inet xraywrt mangle_output meta mark & 0x08000000 == 0x08000000 return
-add rule inet xraywrt mangle_output meta nfproto ipv6 udp dport 123 return
-add rule inet xraywrt mangle_output ip daddr != 198.18.0.0/15 udp dport 123 return
 add rule inet xraywrt mangle_output meta l4proto { tcp, udp } th dport 53 return
 add rule inet xraywrt mangle_output ip daddr @bypass_dst return
 add rule inet xraywrt mangle_output ip6 daddr @bypass_dst6 return
@@ -77,6 +73,5 @@ add rule inet xraywrt mangle_output udp dport { 67, 547 } return
 add rule inet xraywrt mangle_output ip daddr @direct_dst return
 add rule inet xraywrt mangle_output ip6 daddr @direct_dst6 return
 add rule inet xraywrt mangle_output meta l4proto { tcp, udp } meta mark set meta mark | 0x08000000
-add rule inet xraywrt mangle_output meta mark & 0x08000000 == 0x08000000 udp dport 443 meta mark set meta mark ^ 0x08000000 reject
 add rule inet xraywrt api_guard meta mark & 0x000000ff == 2 ip daddr 127.0.0.0/8 tcp dport 10085 reject with tcp reset
 add rule inet xraywrt api_guard meta mark & 0x000000ff == 2 ip6 daddr ::1 tcp dport 10085 reject with tcp reset

@@ -6,7 +6,7 @@ sniff 0
 set core_log_level debug
 server-host node.example.com
 uses-wan-dns
-warn no proxy DNS configured, using WAN DNS [E:dns_wan]
+warn no proxy DNS configured, using WAN DNS directly [E:dns_wan]
 rules-target proxy
 direct-domains 0
 provider-fake-domains 0

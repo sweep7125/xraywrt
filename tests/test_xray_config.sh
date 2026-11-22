@@ -9,7 +9,47 @@ tmpdir="$(make_temp_dir)"
 trap 'rm -rf "$tmpdir"' EXIT
 source "$ROOT_DIR/tests/xray_gen_lib.sh"
 
-# UX 4.1a: infer the provider's final path, not the UCI default.
+# A unique case-insensitive BLOCK blackhole is reused for the stale FakeIP guard.
+for tag in block BLOCK Block; do
+ src_json "{\"outbounds\":[{\"tag\":\"proxy\",\"protocol\":\"vless\"},{\"tag\":\"$tag\",\"protocol\":\"blackhole\"}],\"dns\":{\"servers\":[{\"address\":\"fakedns\",\"domains\":[\"domain:a.test\"]}]}}"
+ gen "$tmpdir/src.json"
+ assert_eq 0 "$rc" "provider BLOCK generation: $errtxt"
+ assert_eq "$tag" "$(jq -r '.routing.rules[2].outboundTag' <<<"$out")" 'FakeIP guard uses exact provider BLOCK tag'
+ assert_eq 0 "$(jq '[.outbounds[] | select(.tag == "xraywrt-block")] | length' <<<"$out")" 'no redundant block outbound'
+done
+src_json '{"outbounds":[{"tag":"proxy","protocol":"vless"},{"tag":"Block","protocol":"blackhole"}],"dns":{"servers":[{"address":"fakedns","domains":["domain:a.test"]}]},"routing":{"rules":[{"domain":["full:blocked.test"],"outboundTag":"xraywrt-block"}]}}'
+gen "$tmpdir/src.json"
+assert_eq 0 "$rc" "provider legacy block reference generation: $errtxt"
+assert_eq Block "$(jq -r '.routing.rules[2].outboundTag' <<<"$out")" 'guard uses provider block despite legacy reference'
+jq -e '[.outbounds[] | select(.tag == "xraywrt-block" and .protocol == "blackhole")] | length == 1' <<<"$out" >/dev/null || fail 'legacy block reference retains blackhole'
+for reference in '"routing":{"balancers":[{"tag":"pool","selector":["xraywrt-block"]}]}' '"routing":{"balancers":[{"tag":"pool","fallbackTag":"xraywrt-block"}]}' '"outbounds":[{"tag":"proxy","protocol":"vless","proxySettings":{"tag":"xraywrt-block"}},{"tag":"Block","protocol":"blackhole"}]' '"outbounds":[{"tag":"proxy","protocol":"vless","streamSettings":{"sockopt":{"dialerProxy":"xraywrt-block"}}},{"tag":"Block","protocol":"blackhole"}]'; do
+ jq -n --argjson reference "{$reference}" '{outbounds:[{tag:"proxy",protocol:"vless"},{tag:"Block",protocol:"blackhole"}]} + $reference' >"$tmpdir/src.json"
+ gen "$tmpdir/src.json"
+ assert_eq 0 "$rc" "legacy reference generation: $errtxt"
+ jq -e '[.outbounds[] | select(.tag == "xraywrt-block" and .protocol == "blackhole")] | length == 1' <<<"$out" >/dev/null || fail "legacy reference retains blackhole: $reference"
+done
+# Selectors match tag prefixes; tag references require exact equality.
+for reference in '"routing":{"balancers":[{"tag":"pool","selector":["xraywrt-b"]}]}' '"observatory":{"subjectSelector":["xraywrt-b"]}' '"burstObservatory":{"subjectSelector":["xraywrt-b"]}'; do
+ jq -n --argjson reference "{$reference}" '{outbounds:[{tag:"proxy",protocol:"vless"},{tag:"BlOcK",protocol:"blackhole"}]} + $reference' >"$tmpdir/src.json"
+ gen "$tmpdir/src.json"
+ assert_eq 0 "$rc" "prefix selector generation: $errtxt"
+ jq -e '[.outbounds[] | select(.tag == "xraywrt-block" and .protocol == "blackhole")] | length == 1' <<<"$out" >/dev/null || fail "prefix selector retains legacy block: $reference"
+done
+for reference in '"routing":{"balancers":[{"tag":"pool","selector":["xraywrt-block-extra"]}]}' '"observatory":{"subjectSelector":["xraywrt-block-extra"]}' '"burstObservatory":{"subjectSelector":["xraywrt-block-extra"]}' '"routing":{"rules":[{"outboundTag":"xraywrt-b"}]}' '"routing":{"balancers":[{"tag":"pool","fallbackTag":"xraywrt-b"}]}' '"outbounds":[{"tag":"proxy","protocol":"vless","proxySettings":{"tag":"xraywrt-b"}},{"tag":"BlOcK","protocol":"blackhole"}]' '"outbounds":[{"tag":"proxy","protocol":"vless","streamSettings":{"sockopt":{"dialerProxy":"xraywrt-b"}}},{"tag":"BlOcK","protocol":"blackhole"}]'; do
+ jq -n --argjson reference "{$reference}" '{outbounds:[{tag:"proxy",protocol:"vless"},{tag:"BlOcK",protocol:"blackhole"}]} + $reference' >"$tmpdir/src.json"
+ gen "$tmpdir/src.json"
+ assert_eq 0 "$rc" "nonmatching reference generation: $errtxt"
+ assert_eq 0 "$(jq '[.outbounds[] | select(.tag == "xraywrt-block")] | length' <<<"$out")" "nonmatching reference does not retain legacy block: $reference"
+done
+for outbounds in '[{"tag":"block","protocol":"freedom"}]' '[{"tag":"BLOCK","protocol":"blackhole"},{"tag":"block","protocol":"blackhole"}]'; do
+ src_json "{\"outbounds\":$outbounds,\"dns\":{\"servers\":[{\"address\":\"fakedns\",\"domains\":[\"domain:a.test\"]}]}}"
+ gen "$tmpdir/src.json"
+ assert_eq 0 "$rc" "incompatible BLOCK generation: $errtxt"
+ assert_eq xraywrt-block "$(jq -r '.routing.rules[2].outboundTag' <<<"$out")" 'incompatible BLOCK falls back'
+done
+pass 'provider BLOCK reuse'
+
+# UX 4.1a: default to proxy-first unless the provider or user specifies a mode.
 mode_case() {
  src_json "$1"
  gen "$tmpdir/src.json" "${4:-.mode_override = false | .mode = \"direct-first\"}"
@@ -18,10 +58,10 @@ mode_case() {
  prof_has "mode-source $3"
 }
 mode_case '{"outbounds":[{"protocol":"vless","tag":"proxy"}]}' proxy-first auto
-mode_case '{"outbounds":[{"protocol":"freedom","tag":"direct"}],"dns":{"servers":[{"address":"fakedns","domains":["domain:a.test"]}]}}' direct-first auto
+mode_case '{"outbounds":[{"protocol":"freedom","tag":"direct"}],"dns":{"servers":[{"address":"fakedns","domains":["domain:a.test"]}]}}' proxy-first auto
 mode_case '{"outbounds":[{"protocol":"freedom","tag":"direct"}]}' proxy-first auto
 for condition in '"network":"tcp,udp"' '"ip":["0.0.0.0/0","::/0"]' '"port":"0-65535"' '"port":"1-65535"' '"type":"field"'; do
- mode_case '{"outbounds":[{"protocol":"vless","tag":"proxy"},{"protocol":"freedom","tag":"direct"}],"xraywrt":{"proxy-ips":[]},"routing":{"rules":[{"domain":["a.test"],"outboundTag":"proxy"},{'"$condition"',"outboundTag":"direct"}]}}' direct-first auto
+ mode_case '{"outbounds":[{"protocol":"vless","tag":"proxy"},{"protocol":"freedom","tag":"direct"}],"xraywrt":{"proxy-ips":[]},"routing":{"rules":[{"domain":["a.test"],"outboundTag":"proxy"},{'"$condition"',"outboundTag":"direct"}]}}' proxy-first auto
 done
 for condition in '"inboundTag":["x"]' '"source":["10.0.0.0/8"]' '"user":["x"]' '"network":"tcp"' '"ip":["0.0.0.0/0"]' '"network":"tcp,udp","port":"0-65535"'; do
  mode_case '{"outbounds":[{"protocol":"vless","tag":"proxy"},{"protocol":"freedom","tag":"direct"}],"xraywrt":{"proxy-ips":[]},"routing":{"rules":[{'"$condition"',"outboundTag":"direct"}]}}' proxy-first auto
@@ -30,7 +70,7 @@ mode_case '{"outbounds":[{"protocol":"freedom","tag":"direct"}],"xraywrt":{"prox
 mode_case '{"outbounds":[{"protocol":"freedom","streamSettings":{"sockopt":{"dialerProxy":"proxy"}}}],"xraywrt":{"proxy-ips":[]}}' proxy-first auto
 mode_case '{"outbounds":[{"protocol":"freedom"}],"xraywrt":{"mode":"direct-first"}}' direct-first provider
 mode_case '{"outbounds":[{"protocol":"freedom"}],"xraywrt":{"mode":"direct-first"}}' proxy-first user '.mode_override = true | .mode = "proxy-first"'
-pass 'provider mode inference'
+pass 'provider mode defaults'
 
 # UX 4.2: own direct sites require provider HTTP/TLS/QUIC sniffing in proxy-first.
 printf 'example.com direct\nexample.com direct # duplicate\nvpn.test core\n' >"$tmpdir/rules.txt"
@@ -40,7 +80,7 @@ for mode in proxy-first direct-first; do
  gen "$FX/src/sniff-tproxy.json" '.mode_override = true | .mode = "'"$mode"'" | '"$(rules_filter)"
  assert_eq 0 "$rc" "direct sites generation: $errtxt"
  prof_has 'direct-domains 1'
- jq -e '.routing.rules[4] == {domain:["domain:example.com"],outboundTag:"xraywrt-direct",ruleTag:"xraywrt-rule-1"}' <<<"$out" >/dev/null || fail 'direct site rule before provider rules'
+ jq -e '.routing.rules[4] == {domain:["domain:example.com"],inboundTag:["xraywrt-tproxy4","xraywrt-tproxy6"],outboundTag:"direct",ruleTag:"xraywrt-rule-1"} and .routing.rules[5] == {domain:["domain:example.com"],outboundTag:"xraywrt-direct",ruleTag:"xraywrt-rule-1-service"}' <<<"$out" >/dev/null || fail 'direct site rule before provider rules'
  if [ "$mode" = direct-first ]; then
   jq -e '.dns.servers[0] == {address:"192.0.2.53",domains:["domain:example.com"],skipFallback:true,finalQuery:true}' <<<"$out" >/dev/null || fail 'real DNS precedes fakedns'
  else
@@ -259,7 +299,7 @@ for fake in false true; do
 		XRAY_LOCATION_ASSET=/usr/local/share/xray-test xray-test run -test -c "$tmpdir/out.json" >"$tmpdir/sniff-core.log" 2>&1 ||
 			fail "no sniffing/no fake-IP core test: $(cat "$tmpdir/sniff-core.log")"
 	else
-		jq -e '[.inbounds[] | select(.tag == "xraywrt-tproxy4" or .tag == "xraywrt-tproxy6") | .sniffing == {enabled:true,destOverride:["fakedns"]}] | all' <<<"$out" >/dev/null || fail 'fake-IP synthesizes only fakedns sniffing'
+		jq -e '[.inbounds[] | select(.tag == "xraywrt-tproxy4" or .tag == "xraywrt-tproxy6") | .sniffing == {enabled:true,destOverride:["fakedns"],routeOnly:true}] | all' <<<"$out" >/dev/null || fail 'fake-IP synthesizes only fakedns sniffing'
 	fi
 done
 jq '.inbounds = [.inbounds[1]]' "$FX/src/sniff-tproxy.json" >"$tmpdir/src.json"
@@ -275,7 +315,7 @@ gen "$tmpdir/src.json" '.rules_file = "'"$tmpdir/sniff-fake.txt"'"'
 assert_eq '["tls","fakedns"]' "$(jq -c '.inbounds[] | select(.tag == "xraywrt-tproxy4").sniffing.destOverride' <<<"$out")" 'existing fakedns is not duplicated or reordered'
 gen "$FX/src/sniff-disabled.json" '.rules_file = "'"$tmpdir/sniff-fake.txt"'"'
 prof_has 'sniff 0'
-assert_eq '{"enabled":true,"destOverride":["fakedns"]}' "$(jq -c '.inbounds[] | select(.tag == "xraywrt-tproxy4").sniffing' <<<"$out")" 'fake-IP replaces disabled sniffing'
+assert_eq '{"enabled":true,"destOverride":["fakedns"],"routeOnly":true}' "$(jq -c '.inbounds[] | select(.tag == "xraywrt-tproxy4").sniffing' <<<"$out")" 'fake-IP replaces disabled sniffing'
 # An enabled block anywhere beats a disabled transparent listener.
 jq '.inbounds[0].sniffing.enabled = false' "$FX/src/sniff-tproxy.json" >"$tmpdir/src.json"
 gen "$tmpdir/src.json"
@@ -300,6 +340,10 @@ set bypass_subscription_dns 0
 set block_client_ipv6 0
 set dns_forward_other_types 1
 set lists_interval 12' "$actual" 'provider settings'
+xr '{"discord-voice": true}'
+assert_eq 'set discord_voice 1' "$actual" 'provider Discord Voice boolean'
+xr '{"discord-voice": "maybe"}'
+assert_eq 'ignored discord-voice' "$actual" 'invalid Discord Voice boolean'
 xr '{"mode": "proxy-first", "lists-interval": "024"}'
 assert_eq 'set mode proxy-first
 set lists_interval 24' "$actual" 'string interval'
@@ -349,7 +393,7 @@ jq '.outbounds += [
 ]' "$FX/src/single.json" >"$tmpdir/src.json"
 gen "$tmpdir/src.json"
 assert_eq 0 "$rc" "marks: $errtxt"
-assert_eq 'proxy direct block chain - nostream xraywrt-direct xraywrt-block xraywrt-dns' \
+assert_eq 'proxy direct block chain - nostream xraywrt-direct xraywrt-dns' \
 	"$(jq -r '[.outbounds[] | .tag // "-"] | join(" ")' <<<"$out")" 'outbound order'
 jq -e '[.outbounds[] | select(.protocol != "blackhole") | .streamSettings.sockopt.mark == 2] | all' <<<"$out" >/dev/null ||
 	fail "every outbound gets mark 2: $(jq -c '[.outbounds[].streamSettings]' <<<"$out")"
@@ -359,15 +403,15 @@ jq -e '.outbounds[3].streamSettings == {network: "ws", sockopt: {mark: 2, dialer
 jq -e '.outbounds[4].streamSettings.sockopt.tcpFastOpen == true' <<<"$out" >/dev/null || fail 'sockopt keys kept'
 prof_has 'warn outbound "chain" mark 255 replaced with 2'
 assert_eq 1 "$(grep -c '^warn outbound' <<<"$prof")" 'one mark warning'
-jq -e '.outbounds[-3:] | (.[0] | del(.settings)) == {tag: "xraywrt-direct", protocol: "freedom", streamSettings: {sockopt: {mark: 2, domainStrategy: "ForceIP"}}} and
-	.[1] == {tag: "xraywrt-block", protocol: "blackhole"} and .[2].protocol == "dns" and .[2].streamSettings.sockopt.mark == 2' <<<"$out" >/dev/null ||
+jq -e '.outbounds[-2:] | (.[0] | del(.settings)) == {tag: "xraywrt-direct", protocol: "freedom", streamSettings: {sockopt: {mark: 2, domainStrategy: "ForceIP"}}} and
+	.[1].protocol == "dns" and .[1].streamSettings.sockopt.mark == 2' <<<"$out" >/dev/null ||
 	fail "service outbounds: $(jq -c '.outbounds[-3:]' <<<"$out")"
-# Spec 6.4: happyEyeballs only from the provider's freedom outbound tagged "direct".
+# Provider options remain on the provider outbound, not the fallback.
 he='{"tryDelayMs":250,"prioritizeIPv6":true}'
 jq --argjson he "$he" '.outbounds[1].streamSettings = {sockopt: {happyEyeballs: $he, domainStrategy: "UseIPv4"}}' "$FX/src/single.json" >"$tmpdir/src.json"
 gen "$tmpdir/src.json"
-assert_eq "{\"happyEyeballs\":$he,\"domainStrategy\":\"ForceIP\",\"mark\":2}" \
-	"$(jq -c '.outbounds[] | select(.tag == "xraywrt-direct") | .streamSettings.sockopt' <<<"$out")" 'direct happyEyeballs copied'
+assert_eq '{"domainStrategy":"ForceIP","mark":2}' \
+	"$(jq -c '.outbounds[] | select(.tag == "xraywrt-direct") | .streamSettings.sockopt' <<<"$out")" 'fallback does not copy happyEyeballs'
 jq -e --argjson he "$he" '.outbounds[1].streamSettings.sockopt == {happyEyeballs: $he, domainStrategy: "UseIPv4", mark: 2}' <<<"$out" >/dev/null || fail 'provider direct unchanged'
 jq --argjson he "$he" '.outbounds[1] |= (.tag = "direct-2" | .streamSettings = {sockopt: {happyEyeballs: $he}}) | .outbounds[2] = {tag: "direct", protocol: "vless", streamSettings: {sockopt: {happyEyeballs: $he}}}' "$FX/src/single.json" >"$tmpdir/src.json"
 gen "$tmpdir/src.json"
@@ -413,7 +457,7 @@ pass 'marks and service outbounds'
 # A5.6 router inbounds (spec 6.3), the same in both modes.
 tp() {
 	jq -nc --arg t "$1" --arg l "$2" --argjson p "$3" --argjson d "$4" '{tag: $t, protocol: "tunnel", listen: $l, port: $p,
-		settings: {allowedNetwork: "tcp,udp", followRedirect: true}, streamSettings: {sockopt: {tproxy: "tproxy"}}} + if $d == null then {} else {sniffing: {enabled: true, destOverride: $d}} end'
+		settings: {allowedNetwork: "tcp,udp", followRedirect: true}, streamSettings: {sockopt: {tproxy: "tproxy"}}} + if $d == null then {} else {sniffing: {enabled: true, destOverride: $d, routeOnly: true}} end'
 }
 dnsin='{"tag":"xraywrt-dns-in","protocol":"tunnel","listen":"127.0.0.1","port":7874,"settings":{"allowedNetwork":"tcp,udp"}}'
 for mode in proxy-first direct-first; do
@@ -441,13 +485,13 @@ pass 'router inbounds'
 
 # A5.7 service routing rules before the provider's (spec 6.5).
 dnsrule='{"inboundTag":["xraywrt-dns-in"],"outboundTag":"xraywrt-dns"}'
-boot='{"inboundTag":["xraywrt-dns-internal"],"ip":["127.0.0.1"],"port":53,"outboundTag":"xraywrt-direct"}'
+boot='{"inboundTag":["xraywrt-dns-internal"],"ip":["127.0.0.1","192.0.2.53"],"port":53,"outboundTag":"xraywrt-direct"}'
 gen "$FX/src/single.json"
 assert_eq "[$dnsrule,$boot,{\"ip\":[\"geoip:private\"],\"outboundTag\":\"direct\"}]" "$(jq -c .routing.rules <<<"$out")" 'rules without fakedns'
 jq -e '.routing.domainStrategy == "AsIs"' <<<"$out" >/dev/null || fail 'routing keys kept'
 jq '.dns = {"servers": ["fakedns"]} | del(.routing)' "$FX/src/single.json" >"$tmpdir/src.json"
 gen "$tmpdir/src.json" '.fakeip_range = "198.18.0.0/16"'
-assert_eq "[$dnsrule,$boot,{\"ip\":[\"198.18.0.0/16\"],\"outboundTag\":\"xraywrt-block\"},{\"inboundTag\":[\"xraywrt-fakeip-direct\"],\"outboundTag\":\"xraywrt-direct\"}]" \
+assert_eq "[$dnsrule,$boot,{\"ip\":[\"198.18.0.0/16\"],\"outboundTag\":\"block\"},{\"inboundTag\":[\"xraywrt-fakeip-direct\"],\"outboundTag\":\"direct\"}]" \
 	"$(jq -c .routing.rules <<<"$out")" 'rules with fakedns, no provider routing'
 jq '.routing = {"rules": "x"}' "$FX/src/single.json" >"$tmpdir/src.json"
 gen_fails "$tmpdir/src.json" 'config: routing.rules is not an array'

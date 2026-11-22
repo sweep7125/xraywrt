@@ -83,20 +83,22 @@ return view.extend({
 
 		this.titles = api.LIST_TITLES();
 		this.rulesOption(s, proxyFirst);
-		// Each mode has its own device list; the select decides which one shows, before saving too.
+		// VPN devices apply in direct-first; direct devices apply in both modes.
 		if (!modeKnown) {
 			this.devicesOption(s, 'src', _('Use a MAC address: it covers IPv4 and IPv6.'), leases);
 		}
 		else {
-			// "As in the configuration" is the mode the configuration gives, or infers when it says nothing.
+			// "As in the configuration" is the mode the configuration gives, or proxy-first when it says nothing.
 			const configMode = this.profile.mode_source === 'user' ? this.profile.provider?.mode : this.profile.mode;
-			for (const [ mode, kind ] of [ [ 'direct-first', 'src' ], [ 'proxy-first', 'direct_src' ] ]) {
+			for (const [ mode, kind ] of [ [ 'direct-first', 'src' ] ]) {
 				o = this.devicesOption(s, kind, _('Use a MAC address: it covers IPv4 and IPv6.'), leases);
 				o.depends('mode', mode);
 				if (configMode === mode)
 					o.depends('mode', 'provider');
 			}
 		}
+
+		this.devicesOption(s, 'direct_src', _('Direct devices bypass VPN rules, but client IPv6 blocking still applies.'), leases);
 
 		// Nothing to refresh without a link in a list (provider lists may carry links).
 		const hasLinks = !!this.listsError || 'lists_interval' in (this.profile.provider || {}) ||
@@ -117,7 +119,7 @@ return view.extend({
 					values.push(saved);
 				for (const value of values)
 					v.value(value, api.intervalLabel(value));
-				v.default = '24';
+				v.default = '0';
 				v.rmempty = false;
 				return v;
 			});
