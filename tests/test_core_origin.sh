@@ -33,6 +33,7 @@ api)
  done
  ;;
 repo)
+ pkg_version() { echo 0.26.2-r1; }
  printf '{}\n' >"$CORE_JSON_FILE"
  assert_eq sweep7125/xraywrt "$(xraywrt-json core-repo "$CORE_JSON_FILE")" 'missing repo defaults to legacy'
  for repo in sweep7125/xraywrt sweep7125/xraywrt-core; do
@@ -41,7 +42,7 @@ repo)
  done
  failures=0
  for invalid in '"sweep7125/xraywrt-core\n"' '"sweep7125/xraywrt-core\u0000"' '"sweep7125/xraywrt\r"' '"sweep7125/xraywrt-core\t"' 'null' 'false' '123' '[]' '{}' '""' '"other/repo"'; do
-  jq -nc --arg a "$asset" --arg s "$sha" --argjson r "$invalid" '{source:"package",tag:"v0.26.2",asset:$a,sha256:$s,size:123,repo:$r}' >"$CORE_JSON_FILE"
+  jq -nc --arg a "$asset" --arg s "$sha" --argjson r "$invalid" '{source:"package",tag:"v0.26.2",version:"0.26.2-r1",asset:$a,sha256:$s,size:123,repo:$r}' >"$CORE_JSON_FILE"
   rm -f "$tmpdir/requests"
   if core_pkg_old_fetch || [ -e "$tmpdir/requests" ]; then
    printf 'FAIL: invalid rollback repo reached fetch or succeeded: %s\n' "$invalid" >&2

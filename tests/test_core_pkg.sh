@@ -166,6 +166,14 @@ for invalid in '"evil/repo"' '""' 'null'; do
 done
 pass 'rollback origin allowlist and legacy default'
 
+# A manual APK upgrade can leave the rollback record pointing at an older core.
+install_old_pkg
+mkdir -p "$CORE_TMP_DIR"
+printf '%s\n' "$new_version" >"$tmpdir/apk.installed"
+if core_pkg_old_fetch; then fail 'stale rollback APK accepted'; fi
+assert_false 'stale rollback APK never fetched' test -e "$tmpdir/fetch.log"
+pass 'stale rollback record refused before downloading'
+
 # Candidate rejection must precede package mutation, even with a stopped service.
 export VERSION_LINE='Xray 26.11.1 xcore-0.25.1 (rust linux/aarch64)'
 for state in 0 1; do
@@ -578,6 +586,12 @@ jq -e --arg v "$old_version" --arg n "$new_version" '.installed == {tag: "v0.1.0
 core_update >/dev/null 2>&1 || fail "update for check: $CORE_ERROR"
 check
 jq -e '.update_available == false and .installed.version == .latest.version' <<<"$result" >/dev/null || fail "same version: $result"
+cp "$CORE_JSON_FILE" "$tmpdir/current.json"
+cp "$tmpdir/old.json" "$CORE_JSON_FILE"
+check
+jq -e --arg v "$new_version" '.installed == {tag: null, source: "package", version: $v} and .update_available == false' <<<"$result" >/dev/null ||
+	fail "same version with stale metadata: $result"
+mv "$tmpdir/current.json" "$CORE_JSON_FILE"
 mv "$XRAY_BIN" "$tmpdir/package-core.off"
 check
 jq -e '.update_available == true and .xray_version == null' <<<"$result" >/dev/null || fail "missing package binary: $result"

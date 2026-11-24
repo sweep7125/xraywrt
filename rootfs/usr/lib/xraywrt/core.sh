@@ -402,18 +402,23 @@ core_pkg_resolve_direct() {
 # $CORE_TMP_DIR/old.apk, verified by its sha256 (spec 4.5 rollback).
 # Needs MemAvailable > size + 16 MiB. Sets CORE_OLD_ERROR on failure.
 core_pkg_old_fetch() {
-	local fields="" source="" tag="" asset="" sha="" size="" avail="" repo="" out="$CORE_TMP_DIR/old.apk"
+	local fields="" source="" tag="" asset="" sha="" size="" avail="" repo="" recorded="" installed="" out="$CORE_TMP_DIR/old.apk"
 
 	CORE_OLD_ERROR=""
-	fields="$(core_json_get source:tag:asset:sha256:size)"
+	fields="$(core_json_get source:tag:asset:sha256:size:version)"
 	source="${fields%%:*}" fields="${fields#*:}"
 	tag="${fields%%:*}" fields="${fields#*:}"
 	asset="${fields%%:*}" fields="${fields#*:}"
-	sha="${fields%%:*}" size="${fields#*:}"
+	sha="${fields%%:*}" fields="${fields#*:}"
+	size="${fields%%:*}" recorded="${fields#*:}"
 	case "$asset" in "${CORE_PACKAGE}_"*.apk) ;; *) asset="" ;; esac
 	case "$asset" in *[!A-Za-z0-9._+-]*) asset="" ;; esac
 	if ! { [ "$source" = package ] && is_valid_core_tag "$tag" && [ -n "$asset" ] && is_sha256_hex "$sha" && is_uint "$size"; }; then
 		CORE_OLD_ERROR="core.json does not name the installed package for a rollback"
+		return 1
+	fi
+	if ! installed="$(pkg_version "$CORE_PACKAGE")" || [ -z "$installed" ] || [ "$installed" != "$recorded" ]; then
+		CORE_OLD_ERROR="core.json does not match the installed package for a rollback"
 		return 1
 	fi
 	repo="$(xraywrt-json core-repo "$CORE_JSON_FILE" 2>/dev/null)" || repo=""
@@ -659,8 +664,12 @@ core_package_installed() {
 core_check_json() {
 	local installed="" rc=0 available=0 version=""
 
-	installed="$(core_json_get source:tag)"
+	installed="$(core_json_get source:tag:version)"
 	version="$(core_package_installed && pkg_version "$CORE_PACKAGE")"
+	if [ -n "$version" ] && { [ "${installed%%:*}" != package ] || [ "${installed##*:}" != "$version" ]; }; then
+		installed="package::"
+	fi
+	installed="${installed%:*}"
 	CORE_TAG="" CORE_SIZE="" CORE_PKG_VERSION="" CORE_ERROR=""
 	core_pkg_resolve || rc=1
 	[ "$rc" -ne 0 ] || { [ -x "$XRAY_BIN" ] && [ "$version" = "$CORE_PKG_VERSION" ]; } || available=1

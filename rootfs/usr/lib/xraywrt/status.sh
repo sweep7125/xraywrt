@@ -132,7 +132,8 @@ status_core_source() {
 
 	fields="$(core_json_get source:channel:tag:version)"
 	# One database read: an installed package always has a version.
-	if [ "${fields%%:*}" != package ] && version="$(pkg_version "$CORE_PACKAGE")" && [ -n "$version" ]; then
+	if version="$(pkg_version "$CORE_PACKAGE")" && [ -n "$version" ] &&
+		{ [ "${fields%%:*}" != package ] || [ "${fields##*:}" != "$version" ]; }; then
 		fields="package:core::$version"
 	fi
 	printf '%s' "$fields"

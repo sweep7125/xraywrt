@@ -439,6 +439,14 @@ pkg_version() { [ "$1" = xraywrt-core ] && echo 0.23.0-r1; }
 jq -e '.core_source == {source: "package", channel: "core", tag: null, version: "0.23.0-r1"}' <<<"$(status_json)" >/dev/null || fail "hand-installed package source: $(status_json | jq -c .core_source)"
 jq -nc '{channel: "XTLS/Xray-core", tag: "v26.1.1", source: "channel"}' >"$CORE_JSON_FILE"
 jq -e '.core_source.source == "package" and .core_source.version == "0.23.0-r1"' <<<"$(status_json)" >/dev/null || fail "package over a stale channel core.json: $(status_json | jq -c .core_source)"
+jq -nc '{source: "package", channel: "core", tag: "v0.26.2-r1", version: "0.26.2-r1"}' >"$CORE_JSON_FILE"
+pkg_version() { [ "$1" = xraywrt-core ] && echo 0.26.5-r2; }
+jq -e '.core_source == {source: "package", channel: "core", tag: null, version: "0.26.5-r2"}' <<<"$(status_json)" >/dev/null ||
+	fail "package over a stale package core.json: $(status_json | jq -c .core_source)"
+jq '.tag = "v0.26.5-r2" | .version = "0.26.5-r2"' "$CORE_JSON_FILE" >"$CORE_JSON_FILE.new"
+mv "$CORE_JSON_FILE.new" "$CORE_JSON_FILE"
+jq -e '.core_source == {source: "package", channel: "core", tag: "v0.26.5-r2", version: "0.26.5-r2"}' <<<"$(status_json)" >/dev/null ||
+	fail "matching package metadata: $(status_json | jq -c .core_source)"
 unset -f pkg_version
 # Spec 15: the Core page shows "<version> (package)".
 jq -nc '{channel: "core", tag: "v0.2.0", version: "26.11.1-r1", source: "package"}' >"$CORE_JSON_FILE"

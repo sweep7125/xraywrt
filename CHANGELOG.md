@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9
+
+- Show the installed core package version after manual APK updates.
+- Refuse to use stale core metadata for rollback.
+
 ## 0.1.8
 
 - Align the vertical spacing around the Show balancers button on Home.
