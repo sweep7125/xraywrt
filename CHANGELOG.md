@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8
+
+- Align the vertical spacing around the Show balancers button on Home.
+
 ## 0.1.7
 
 - Move the Xray management API to a private Unix socket. For manual upgrades, install XrayWRT core 0.26.5-r2 or newer before updating the app. The installer checks managed core compatibility.

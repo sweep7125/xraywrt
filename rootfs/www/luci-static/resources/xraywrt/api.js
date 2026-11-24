@@ -37,7 +37,7 @@ const CSS = `
 .mw-announce { white-space: pre-wrap; overflow-wrap: anywhere; }
 .mw-announce + .mw-grid { margin-top: 12px; }
 .mw-toggle > .mw-row + * { margin-top: 12px; }
-:not(.mw-page) > .mw-toggle { margin-top: 12px; }
+:not(.mw-page):not(.mw-balancers-section) > .mw-toggle { margin-top: 12px; }
 .mw-job:empty { position: absolute; }
 .mw-settings > .mw-page { margin-top: 16px; }
 .mw-settings .cbi-value-field select { width: auto; min-width: min-content; max-width: 100%; }
