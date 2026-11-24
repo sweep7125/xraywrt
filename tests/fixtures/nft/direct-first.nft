@@ -30,7 +30,6 @@ add chain inet xraywrt mangle_prerouting { type filter hook prerouting priority 
 add chain inet xraywrt prerouting_policy
 add chain inet xraywrt mangle_output { type route hook output priority mangle; policy accept; }
 add chain inet xraywrt proxy_redirect { type filter hook prerouting priority dstnat; policy accept; }
-add chain inet xraywrt api_guard { type filter hook output priority filter; policy accept; }
 add element inet xraywrt proxy_dst { 1.1.1.1 }
 add element inet xraywrt proxy_dst6 { 2001:db8::/32 }
 add element inet xraywrt proxy_src { 192.168.1.10 }
@@ -90,5 +89,3 @@ add rule inet xraywrt mangle_output meta nfproto ipv4 meta l4proto { tcp, udp } 
 add rule inet xraywrt mangle_output ip6 daddr { 2606:4700::1 } meta l4proto { tcp, udp } th dport { 80-90 } meta mark set meta mark | 0x08000000
 add rule inet xraywrt mangle_output meta nfproto ipv6 meta l4proto { tcp, udp } th dport { 53 } meta mark set meta mark | 0x08000000
 add rule inet xraywrt mangle_output ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } meta mark set meta mark | 0x08000000
-add rule inet xraywrt api_guard meta mark & 0x000000ff == 2 ip daddr 127.0.0.0/8 tcp dport 10085 reject with tcp reset
-add rule inet xraywrt api_guard meta mark & 0x000000ff == 2 ip6 daddr ::1 tcp dport 10085 reject with tcp reset

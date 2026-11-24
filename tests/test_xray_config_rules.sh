@@ -57,6 +57,14 @@ selector_routes() (
 sniffing='"inbounds":[{"tag":"in","protocol":"socks","listen":"127.0.0.1","port":1081,"sniffing":{"enabled":true,"destOverride":["tls"]}}]'
 src_json "{\"outbounds\":[$direct_ob,$proxy_ob,$second_ob],\"routing\":{\"balancers\":[{\"tag\":\"pool\",\"selector\":[\"proxy\",\"second\"]}]},$sniffing}"
 
+# The site run between address runs must split both consumers in the same order.
+gen_rules direct-first $'198.51.100.1;80;udp proxy\nfirst.test proxy\n198.51.100.2;80;udp proxy\nsecond.test direct'
+jq -e '[.[] | .ruleTag] == ["xraywrt-rule-1","xraywrt-rule-2","xraywrt-rule-3","xraywrt-rule-4"]' <<<"$(own_rules)" >/dev/null || fail 'interleaved address/site run boundaries'
+printf '{}\n' >"$tmpdir/remote.json"
+printf 'proxy\n' | xraywrt-json rules packet-addresses "$tmpdir/rules.txt" "$tmpdir/remote.json" "$tmpdir/out.json" >"$tmpdir/packet"
+assert_eq $'proxy;ip;198.51.100.1;80;udp\nproxy;ip;198.51.100.2;80;udp' "$(cat "$tmpdir/packet")" 'packet address order across site run'
+pass 'core and packet policies preserve interleaved run order'
+
 # Qualified sites route only recognized traffic and never change DNS selection.
 for mode in direct-first proxy-first; do
  gen_rules "$mode" $'overlap.example;443;udp direct\noverlap.example;443;tcp proxy\nother.example;;udp pool'

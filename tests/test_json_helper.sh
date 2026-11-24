@@ -34,6 +34,15 @@ done
 printf '%s\n' '{"id":"10-20","started":10,"state":"ok"}' >"$tmpdir/a.json"
 printf '%s\n' '{"id":"10-3","started":10,"state":"running"}' >"$tmpdir/b.json"
 parity 'history numeric tie breaker' "$(jq -s 'sort_by(.started, (.id|split("-")|map(tonumber)))' "$tmpdir/"*.json)" history sort "$tmpdir/"*.json
+parity 'history sort-last' '10-20' history sort-last "$tmpdir/"*.json
+parity 'history sort-prune retains running and five completed' '' history sort-prune "$tmpdir/"*.json
+mkdir "$tmpdir/history"
+for n in 20 3 11 2 10 4 5; do
+ printf '{"id":"10-%s","started":10,"state":"ok"}\n' "$n" >"$tmpdir/history/$n.json"
+done
+printf '%s\n' '{"id":"10-1","started":10,"state":"running"}' >"$tmpdir/history/active.json"
+parity 'history sort-prune orders numeric IDs and retains active' $'10-2\n10-3' history sort-prune "$tmpdir/history/"*.json
+parity 'history sort-last orders numeric IDs' '10-20' history sort-last "$tmpdir/history/"*.json
 parity 'history last' '10-20' history last <<< '[{"id":"10-3"},{"id":"10-20"}]'
 parity 'history prune keeps five terminal jobs' '1-1' history prune <<< '[{"id":"0-1","state":"running"},{"id":"1-1"},{"id":"2-1"},{"id":"3-1"},{"id":"4-1"},{"id":"5-1"},{"id":"6-1"}]'
 for input in '' '1 2' '{"n":1.0}' 'null' 'broken'; do

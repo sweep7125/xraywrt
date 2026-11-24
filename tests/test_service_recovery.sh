@@ -24,25 +24,56 @@ echo dns >"$DEGRADED_FILE"
 settings_load() { :; }
 service_running() { return 0; }
 runtime_refresh() { echo beta >"$PKG_STATE_DIR/runtime"; }
-policy_reapply_ready() { grep -qx beta "$PKG_STATE_DIR/runtime"; touch "$RUNNING_MARKER"; }
+policy_reapply() { grep -qx beta "$PKG_STATE_DIR/runtime"; touch "$PKG_STATE_DIR/policy"; }
+policy_cleanup() { rm -f "$PKG_STATE_DIR/policy"; }
 service_recovery_reload $$
-[ -f "$RUNNING_MARKER" ] && [ ! -e "$DEGRADED_FILE" ]
+[ -f "$RUNNING_MARKER" ]
+[ ! -e "$DEGRADED_FILE" ]
 rm "$RUNNING_MARKER"
 echo dns >"$DEGRADED_FILE"
+atomic_write() { return 1; }
+if service_recovery_reload $$; then exit 1; fi
+[ ! -e "$RUNNING_MARKER" ]
+[ -e "$DEGRADED_FILE" ]
+[ ! -e "$PKG_STATE_DIR/policy" ]
+. "$XRAYWRT_LIB_DIR/helpers.sh"
+policy_reapply() { touch "$PKG_STATE_DIR/policy" "$USER_STOP_FILE"; }
+service_recovery_reload $$
+[ ! -e "$RUNNING_MARKER" ]
+[ -e "$DEGRADED_FILE" ]
+[ ! -e "$PKG_STATE_DIR/policy" ]
+rm "$USER_STOP_FILE"
+policy_reapply() { grep -qx beta "$PKG_STATE_DIR/runtime"; touch "$PKG_STATE_DIR/policy"; }
+atomic_write() { printf '%s\n' "$2" >"$1"; touch "$USER_STOP_FILE"; }
+service_recovery_reload $$
+[ ! -e "$RUNNING_MARKER" ]
+[ -e "$DEGRADED_FILE" ]
+[ ! -e "$PKG_STATE_DIR/policy" ]
+rm "$USER_STOP_FILE"
+atomic_write() { printf 'other-owner\n' >"$1"; touch "$USER_STOP_FILE"; }
+service_recovery_reload $$
+[ "$(cat "$RUNNING_MARKER")" = other-owner ]
+[ -e "$DEGRADED_FILE" ]
+[ ! -e "$PKG_STATE_DIR/policy" ]
+rm "$USER_STOP_FILE" "$RUNNING_MARKER"
+. "$XRAYWRT_LIB_DIR/helpers.sh"
 runtime_refresh() { touch "$USER_STOP_FILE"; }
 service_recovery_reload $$
-[ ! -e "$RUNNING_MARKER" ] && [ -e "$DEGRADED_FILE" ]
+[ ! -e "$RUNNING_MARKER" ]
+[ -e "$DEGRADED_FILE" ]
 rm "$USER_STOP_FILE"
 runtime_refresh() { return 1; }
 service_recovery_reload $$
-[ -e "$RUNNING_MARKER" ] && [ ! -e "$DEGRADED_FILE" ]
+[ -e "$RUNNING_MARKER" ]
+[ ! -e "$DEGRADED_FILE" ]
 [ "$(cat "$RUNNING_MARKER")" = "$$" ]
 grep -q '\[E:recovery_inputs' "$APPLY_WARNING_FILE"
 rm "$RUNNING_MARKER"
 echo dns >"$DEGRADED_FILE"
 runtime_refresh() { return 2; }
 service_recovery_reload $$
-[ -e "$RUNNING_MARKER" ] && [ ! -e "$DEGRADED_FILE" ]
+[ -e "$RUNNING_MARKER" ]
+[ ! -e "$DEGRADED_FILE" ]
 rm "$RUNNING_MARKER"
 # A stale recovery from an older supervisor cannot apply to a new instance.
 echo 999999 >"$SUPERVISOR_PID_FILE"
@@ -177,7 +208,8 @@ wait "$worker"
 kill -TERM "$sup"
 wait "$sup"
 trap - EXIT
-[ ! -e "$SERVICE_PID_FILE" ] && [ ! -e "$RUNNING_MARKER" ]
+[ ! -e "$SERVICE_PID_FILE" ]
+[ ! -e "$RUNNING_MARKER" ]
 ASH
 pass 'live degraded CLI reload and external recovery publish latest inputs without self-USR1 wait'
 

@@ -309,10 +309,10 @@ subscription_install() {
 # A new config is live: reload settings (the period header and provider lists
 # may be new), fetch the lists that are due and refresh the cron entry.
 subscription_settled() {
-	local result="$1"
+	local result="$1" urls=""
 
 	settings_load || return 1
-	if [ -n "$(lists_urls)" ] && [ "$(lists_update_remote 0)" = changed ]; then
+	if urls="$(lists_urls)" && [ -n "$urls" ] && [ "$(lists_update_remote 0 "$urls")" = changed ]; then
 		if ! with_lock lists_policy_apply; then
 			apply_result "$result" "$(apply_partial_message)"
 			return
@@ -463,7 +463,7 @@ subscription_uci_items() {
 # id). With "defaults" an option the source lacks gets its default, so a new
 # subscription starts clean. Committed by the caller.
 subscription_copy_settings() {
-	local from="$1" to="$2" defaults="${3:-}" pair="" opt="" value="" item=""
+	local from="$1" to="$2" defaults="${3:-}" pair="" opt="" value="" item="" rc=0
 
 	ensure_dir "$PKG_TMP_DIR" || return 1
 	for pair in $SUBSCRIPTION_SETTINGS; do
@@ -477,13 +477,14 @@ subscription_copy_settings() {
 		fi
 	done
 	for opt in $SUBSCRIPTION_SETTING_LISTS; do
-		subscription_uci_items "$from" "$opt" >"$PKG_TMP_DIR/subscription.$$.items"
+		subscription_uci_items "$from" "$opt" >"$PKG_TMP_DIR/subscription.$$.items" || { rm -f "$PKG_TMP_DIR/subscription.$$.items"; return 1; }
 		if uci -q get "$PKG_CONFIG.$to.$opt" >/dev/null 2>&1; then
-			uci -q delete "$PKG_CONFIG.$to.$opt" || return 1
+			uci -q delete "$PKG_CONFIG.$to.$opt" || { rm -f "$PKG_TMP_DIR/subscription.$$.items"; return 1; }
 		fi
 		while IFS= read -r item; do
-			uci -q add_list "$PKG_CONFIG.$to.$opt=$item" || return 1
+			uci -q add_list "$PKG_CONFIG.$to.$opt=$item" || { rc=1; break; }
 		done <"$PKG_TMP_DIR/subscription.$$.items"
+		[ "$rc" = 0 ] || { rm -f "$PKG_TMP_DIR/subscription.$$.items"; return 1; }
 	done
 	rm -f "$PKG_TMP_DIR/subscription.$$.items"
 	return 0

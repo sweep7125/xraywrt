@@ -16,11 +16,11 @@ printf '%s\n' "$*" >>"$API_CALLS"
 STUB
 chmod +x "$XRAY_BIN"
 assert_eq "$(jq -c . "$API_FIXTURE")" "$(xray_api_bi main)" 'bi JSON normalized through JSON helper'
-assert_eq 'api bi --server=127.0.0.1:10085 --timeout=3 -json -- main' "$(tail -1 "$API_CALLS")" 'bi server timeout and JSON flag'
+assert_eq 'api bi --server=unix:/var/run/xraywrt/api.sock --timeout=3 -json -- main' "$(tail -1 "$API_CALLS")" 'bi server timeout and JSON flag'
 xray_api_bo main node-b
-assert_eq 'api bo --server=127.0.0.1:10085 --timeout=3 -b main -- node-b' "$(tail -1 "$API_CALLS")" 'bo pin syntax'
+assert_eq 'api bo --server=unix:/var/run/xraywrt/api.sock --timeout=3 -b main -- node-b' "$(tail -1 "$API_CALLS")" 'bo pin syntax'
 xray_api_bo main ''
-assert_eq 'api bo --server=127.0.0.1:10085 --timeout=3 -b main -r' "$(tail -1 "$API_CALLS")" 'bo remove syntax'
+assert_eq 'api bo --server=unix:/var/run/xraywrt/api.sock --timeout=3 -b main -r' "$(tail -1 "$API_CALLS")" 'bo remove syntax'
 export API_FAIL=1
 assert_false 'bi propagates API error' xray_api_bi main
 assert_false 'bo propagates API error' xray_api_bo main node-b
@@ -130,7 +130,7 @@ assert_false 'UCI failure fails set' balancer_set main node-a 2>/dev/null
 UCI_FAIL=''
 assert_eq 'revert xraywrt.settings.balancer_override' "$(cat "$tmpdir/uci.calls")" 'staged UCI reverted'
 assert_eq 'backup=node-b' "${uci_entries[*]}" 'UCI back to the saved list'
-assert_eq 'api bo --server=127.0.0.1:10085 --timeout=3 -b main -- node-b' "$(tail -1 "$API_CALLS")" 'previous core override restored'
+assert_eq 'api bo --server=unix:/var/run/xraywrt/api.sock --timeout=3 -b main -- node-b' "$(tail -1 "$API_CALLS")" 'previous core override restored'
 # A balancer gone from the runtime: "" only drops the UCI entry.
 uci_entries=('gone=node-a' 'backup=node-b')
 : >"$API_CALLS"
@@ -192,9 +192,9 @@ assert_eq 1 "$(grep -c '^api rmo ' "$API_CALLS")" 'one rmo call for all removed 
 assert_false 'removed tags never on argv' grep -qE 'config\.json|stdin:| keep$' "$API_CALLS"
 assert_eq '{"outbounds":[{"tag":"/tmp/xraywrt/config.json"},{"tag":"stdin:"},{"tag":"keep"}]}' "$(jq -c . "$API_CALLS.rmo")" 'rmo file lists removed tags only'
 assert_eq keep "$(jq -r '[.outbounds[].tag] | join(" ")' "$API_CALLS.ado")" 'changed outbound re-added'
-grep -qE '^api rmo --server=127.0.0.1:10085 --timeout=30 /' "$API_CALLS" || fail "rmo: $(cat "$API_CALLS")"
-grep -qE '^api ado --server=127.0.0.1:10085 --timeout=30 /' "$API_CALLS" || fail "ado: $(cat "$API_CALLS")"
-grep -qx "api adrules --server=127.0.0.1:10085 --timeout=30 $tmpdir/cand.json" "$API_CALLS" || fail "adrules: $(cat "$API_CALLS")"
+grep -qE '^api rmo --server=unix:/var/run/xraywrt/api.sock --timeout=30 /' "$API_CALLS" || fail "rmo: $(cat "$API_CALLS")"
+grep -qE '^api ado --server=unix:/var/run/xraywrt/api.sock --timeout=30 /' "$API_CALLS" || fail "ado: $(cat "$API_CALLS")"
+grep -qx "api adrules --server=unix:/var/run/xraywrt/api.sock --timeout=30 $tmpdir/cand.json" "$API_CALLS" || fail "adrules: $(cat "$API_CALLS")"
 assert_false 'temp delta files removed' test -e "$tmpdir/cand.json.outbounds" -o -e "$tmpdir/cand.json.removed"
 : >"$API_CALLS"
 jq '.outbounds += [{tag:"new",protocol:"freedom"}]' "$tmpdir/old.json" >"$tmpdir/add.json"

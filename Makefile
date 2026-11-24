@@ -3,7 +3,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-xraywrt
-PKG_VERSION:=0.1.6
+PKG_VERSION:=0.1.7
 PKG_RELEASE:=1
 PKG_MAINTAINER:=ristavor <90447432+ristavor@users.noreply.github.com>
 PKG_LICENSE:=GPL-3.0-or-later

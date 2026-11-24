@@ -114,7 +114,7 @@ config_profile_apply() {
 config_install() {
 	local candidate="$1" runtime_candidate="$PKG_TMP_DIR/runtime.candidate.json"
 	local old_profile="$PKG_TMP_DIR/profile.old" old_config="$XRAY_CONFIG.previous.$$"
-	local action=saved inputs="" warning=""
+	local action=saved inputs="" warning="" params="" XRAY_RULE_REMOTE=""
 
 	# Same bytes: spare the flash and the restart.
 	if [ -f "$XRAY_CONFIG" ] && cmp -s "$candidate" "$XRAY_CONFIG"; then
@@ -129,8 +129,8 @@ config_install() {
 	fi
 	settings_load || return 1
 	ensure_dir "$PKG_TMP_DIR" || return 1
-	inputs="$(xray_config_key "$candidate" 2>/dev/null)" || inputs=""
-	if ! { xray_config_generate "$candidate" "$runtime_candidate" && xray_config_test "$runtime_candidate"; }; then
+	xray_config_prepare "$candidate"
+	if ! { xray_config_generate "$candidate" "$runtime_candidate" "" "$params" && xray_config_test "$runtime_candidate"; }; then
 		rm -f "$runtime_candidate" "$runtime_candidate.profile"
 		return 1
 	fi

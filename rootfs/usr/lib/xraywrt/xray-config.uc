@@ -408,7 +408,7 @@ function router_inbounds(params, fake, sniffing) {
 // Spec 6.2: `run -test` binds no ports, so a provider inbound on a router
 // port would pass the check and only fail at start.
 function check_inbound_ports(cfg, params) {
-	let p = params.ports, own = [p.tproxy, p.direct, p.dns, p.api];
+	let p = params.ports, own = [p.tproxy, p.direct, p.dns];
 	for (let i, ib in cfg.inbounds) {
 		let v = ib?.port;
 		if (v == null) continue;
@@ -424,12 +424,9 @@ function check_inbound_ports(cfg, params) {
 	}
 }
 
-// Spec 16: with `listen` the commander serves gRPC itself and registers no
-// outbound, so no inbound or rule can route provider traffic to it.
+// A root-only local socket keeps gRPC off the network.
 function router_api(params) {
-	let p = params.ports;
-	if (p.api in [p.dns, p.tproxy, p.direct]) die(code_message('config_invalid', 'config: %s', sprintf('API port %d collides with a router port', p.api)));
-	return {tag: 'xraywrt-api', listen: '127.0.0.1:' + p.api, services: ['HandlerService', 'RoutingService', 'StatsService']};
+	return {tag: 'xraywrt-api', listen: params.api_listen, services: ['HandlerService', 'RoutingService', 'StatsService']};
 }
 
 // Spec 6.5: router rules go first, the provider's follow unchanged.
@@ -608,7 +605,7 @@ function address_selector(word, cached) {
 		ports = selector_ports(parts[1]);
 		if (ports == null) return null;
 	}
-	let m = match(value, /^(.*)\/([0-9]+)$/), bits = m ? +m[2] : null;
+	let m = index(value, '/') >= 0 ? match(value, /^(.*)\/([0-9]+)$/) : null, bits = m ? +m[2] : null;
 	let addr = iptoarr(m ? m[1] : value);
 	if (addr) {
 		if (bits != null && bits > length(addr) * 8) return null;
@@ -736,21 +733,33 @@ function prepare_address_run(run, remote, readfile, sniffing) {
  }
 }
 
-// An ordered packet policy is needed only when the expanded input contains a
-// selector. Plain legacy lists retain their direct-before-intercept policy.
-function rule_packet_addresses(text, tags, remote, readfile, sniffing) {
- let runs = [], entries = {}, site_core = {}, sites = 0;
+// Keep site deduplication and run boundaries identical for core and packet policy.
+function group_rule_runs(text, tags, on_error, on_limit) {
+ let runs = [], seen = {}, site_core = {}, sites = 0, limited = false;
  for (let e in parse_rules(text, tags)) {
-  if (e.error) continue;
+  if (e.error) { if (on_error) on_error(e); continue; }
   let key = selector_text(e);
-  if (e.kind == 'site' && (entries[key] || site_core[e.value])) continue;
-  if (e.kind == 'site') entries[key] = true;
+  if (e.kind == 'site' && (seen[key] || site_core[e.value])) continue;
+  if (e.kind == 'site') seen[key] = true;
   if (e.kind == 'site' && e.target == 'core') site_core[e.value] = true;
-  if (e.kind == 'site' && sites++ >= FAKE_LIMIT) continue;
-  let kind = e.kind == 'site' ? 'site' : 'ip', last = runs[-1];
+  let kind = e.kind == 'site' ? 'site' : 'ip';
+  if (kind == 'site' && sites >= FAKE_LIMIT) {
+   if (!limited && on_limit) on_limit();
+   limited = true;
+   continue;
+  }
+  if (kind == 'site') sites++;
+  let last = runs[-1];
   if (last && last.kind == kind && last.target == e.target && (kind != 'site' || (last.ports == e.ports && last.proto == e.proto))) push(last.items, e);
   else push(runs, {kind, target: e.target, ports: e.ports, proto: e.proto, items: [e]});
  }
+ return runs;
+}
+
+// An ordered packet policy is needed only when the expanded input contains a
+// selector. Plain legacy lists retain their direct-before-intercept policy.
+function rule_packet_addresses(text, tags, remote, readfile, sniffing) {
+ let runs = group_rule_runs(text, tags, null, null);
  let rows = [], seen = {}, ordered = false, skipped = false;
  for (let run in runs) {
   if (run.kind != 'ip') continue;
@@ -909,31 +918,12 @@ function own_rules(cfg, params, api, profile, original_dns_tag, sniffing, direct
 	for (let tag in found.tags) profile_record(profile, 'rules-target', tag);
 	for (let tag in found.reserved) profile_record(profile, 'rules-reserved', tag);
 	let text = params.rules_file ? api.readfile(params.rules_file) : null;
-	let runs = [], seen = {}, site_core = {}, missing = [], sites = 0, limited = false;
-	for (let e in parse_rules(text, found.tags)) {
+	let missing = [];
+	let runs = group_rule_runs(text, found.tags, (e) => {
 		if (e.error == 'unknown_target') {
 			if (!(e.target in missing)) push(missing, e.target);
-			continue;
-		}
-		if (e.error) {
-			warn_code(profile, 'rule_ignored', 'My rules: line %s "%s" ignored', e.line, e.text);
-			continue;
-		}
-		let key = selector_text(e);
-		if (e.kind == 'site' && (seen[key] || site_core[e.value])) continue;
-		if (e.kind == 'site') seen[key] = true;
-		if (e.kind == 'site' && e.target == 'core') site_core[e.value] = true;
-		let kind = e.kind == 'site' ? 'site' : 'ip';
-		if (kind == 'site' && sites >= FAKE_LIMIT) {
-			if (!limited) warn_code(profile, 'rules_limit', 'My rules has more than %s sites, the rest is ignored', FAKE_LIMIT);
-			limited = true;
-			continue;
-		}
-		if (kind == 'site') sites++;
-		let last = runs[-1];
-		if (last && last.kind == kind && last.target == e.target && (kind != 'site' || (last.ports == e.ports && last.proto == e.proto))) push(last.items, e);
-		else push(runs, {kind, target: e.target, ports: e.ports, proto: e.proto, items: [e]});
-	}
+		} else warn_code(profile, 'rule_ignored', 'My rules: line %s "%s" ignored', e.line, e.text);
+	}, () => warn_code(profile, 'rules_limit', 'My rules has more than %s sites, the rest is ignored', FAKE_LIMIT));
 	if (length(missing)) warn_code(profile, 'rules_target_missing', 'My rules: the targets %s are not in the configuration, their lines are skipped', join(', ', missing));
 	// UX 4.2: fake-IP sniffing alone cannot recognize arbitrary direct sites in
 	// proxy-first. Direct-first answers these names with real addresses, so they

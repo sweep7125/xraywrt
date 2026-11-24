@@ -19,7 +19,8 @@ job-status)
 	fi
 	;;
 logs-json) [ $# -le 2 ] || exit 1 ;;
-runtime-config | profiles | balancers | lists-json | status-json | service-state-json | subscription-json | core-version-json | profile-json | diagnostics-json | check-ip)
+profile-json) [ $# -eq 1 ] || { [ $# -eq 2 ] && [ "$2" = --compact ]; } || exit 1 ;;
+runtime-config | profiles | balancers | lists-json | status-json | service-state-json | subscription-json | core-version-json | diagnostics-json | check-ip)
 	[ $# -eq 1 ] || exit 1
 	;;
 *)

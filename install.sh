@@ -1,7 +1,7 @@
 #!/bin/sh
 # XrayWRT installer: installs or updates the LuCI package (and the optional
-# Russian translation) with apk (OpenWrt 25.12+), then lets
-# /usr/bin/xraywrt install the core from its separate release repository
+# Russian translation) with apk (OpenWrt 25.12+), and uses
+# /usr/bin/xraywrt to install or update the core from its release repository
 # (spec 4.5). SHA256SUMS comes only from github.com (or
 # XRAYWRT_RELEASE_URL); packages from github.com, then the GitHub proxies.
 # Non-interactive: XRAYWRT_ACTION=install|remove XRAYWRT_LANGUAGE=en|ru
@@ -245,8 +245,15 @@ install_packages() {
 	fi
 }
 
+core_compatible() {
+	local version="" comparison=""
+	version="$(pkg_version "$CORE_PKG")"
+	[ -n "$version" ] && comparison="$(apk version -t "$version" 0.26.5-r2)" || return 1
+	case "$comparison" in '=' | '>') return 0 ;; *) return 1 ;; esac
+}
+
 do_install() {
-	local lang="" fresh=1 result="" reason="" before="" after=""
+	local lang="" fresh=1 result="" reason="" before="" after="" core_updated=0
 
 	lang="$(resolve_language)"
 	if pkg_installed "$PKG"; then
@@ -254,10 +261,20 @@ do_install() {
 		before="$(pkg_version "$PKG")"
 	fi
 	WORK="$(mktemp -d /tmp/xraywrt-install.XXXXXX)" || die "cannot create a temporary directory"
+	# Keep the running service on the old app until its managed core can be updated.
+	if [ "$fresh" = 0 ] && pkg_installed "$CORE_PKG"; then
+		if [ -x "$XRAYWRT_BIN" ]; then
+			log "Updating the Xray core..."
+			"$XRAYWRT_BIN" core-update >/dev/null ||
+				die "Xray core update failed; XrayWRT was not updated"
+			core_updated=1
+		fi
+		core_compatible || die "Xray core 0.26.5-r2 or newer is required; XrayWRT was not updated"
+	fi
 	install_packages "$lang"
 
 	# The default core source is the core package: install it, or update it.
-	if [ ! -x "$CORE" ] || pkg_installed "$CORE_PKG"; then
+	if [ ! -x "$CORE" ] || { [ "$core_updated" = 0 ] && pkg_installed "$CORE_PKG"; }; then
 		log "Installing the Xray core..."
 		# stdout is the JSON; the backend's own "Error: ..." line stays on stderr.
 		result="$("$XRAYWRT_BIN" core-update)" || {
@@ -273,6 +290,9 @@ do_install() {
 			esac
 			die "Xray core installation failed${reason:+: $reason}; retry from LuCI → Services → XrayWRT"
 		}
+	fi
+	if pkg_installed "$CORE_PKG" && ! core_compatible; then
+		die "XrayWRT is installed, but Xray core 0.26.5-r2 or newer is required; the service was not enabled"
 	fi
 	log ""
 	if [ "$fresh" = 1 ]; then

@@ -29,6 +29,8 @@ out="$(sh "$ROOT_DIR/rootfs/usr/bin/xraywrt" bogus 2>&1 || true)"
 pass "cli usage"
 
 assert_eq 'backend profile-json' "$(XRAYWRT_BACKEND="$backend" sh "$read_cli" profile-json)" "profile-json read wrapper"
+assert_eq 'backend profile-json --compact' "$(XRAYWRT_BACKEND="$backend" sh "$read_cli" profile-json --compact)" "compact profile passes read ACL wrapper"
+assert_false 'read wrapper rejects additional compact arguments' env XRAYWRT_BACKEND="$backend" sh "$read_cli" profile-json --compact extra
 # A14.1: the Overview profile list is a read; config-check runs the core (write ACL).
 assert_eq 'backend profiles' "$(XRAYWRT_BACKEND="$backend" sh "$read_cli" profiles)" "profiles read wrapper"
 assert_false 'read wrapper rejects profiles arguments' env XRAYWRT_BACKEND="$backend" sh "$read_cli" profiles x
@@ -41,6 +43,11 @@ assert_false 'read wrapper rejects config-check' env XRAYWRT_BACKEND="$backend" 
 # Execute dispatch with the normal module bootstrap removed, not a duplicated case.
 strip_xraywrt_cli_bootstrap >"$tmpdir/cli.sh"
 export XRAYWRT_LIB_DIR
+sed '/^case "$cmd" in/i profile_json() { printf "profile:%s\\n" "$*"; }' "$tmpdir/cli.sh" >"$tmpdir/profile-cli.sh"
+assert_eq 'profile:--compact' "$(sh "$tmpdir/profile-cli.sh" profile-json --compact)" 'compact profile reaches backend'
+assert_eq 'profile:' "$(sh "$tmpdir/profile-cli.sh" profile-json)" 'default profile unchanged'
+assert_false 'backend rejects unknown profile argument' sh "$tmpdir/profile-cli.sh" profile-json --other >/dev/null 2>&1
+assert_false 'backend rejects extra compact arguments' sh "$tmpdir/profile-cli.sh" profile-json --compact extra >/dev/null 2>&1
 for n in 1 2 3 4; do printf '%s\n' "$n" >"$tmpdir/list$n"; done
 # The real CLI argument boundary is exercised with a harmless apply stub.
 sed -i '/^case "$cmd" in/i lists_apply() { local IFS=:; printf "lists:%s\\n" "$*"; }' "$tmpdir/cli.sh"
@@ -268,3 +275,31 @@ pass 'balancer CLI boundary'
 
 sh "$tmpdir/offline-cli.sh" core-update --channel a/b >"$tmpdir/channel.out" 2>&1 && fail 'removed channel accepted'
 assert_file_not_contains "$ROOT_DIR/rootfs/usr/lib/xraywrt/core.sh" 'alternate channels' 'no dead channel branch'
+
+# Exercise the real auto-update dispatcher with controlled discovery outcomes.
+strip_xraywrt_cli_bootstrap >"$tmpdir/auto-cli.sh"
+sed -i '/^case "$cmd" in/i\
+settings_load() { LISTS_INTERVAL="$TEST_INTERVAL"; }\
+subscription_due() { [ "$TEST_SUB_DUE" = 1 ]; }\
+lists_urls() { echo called >>"$TEST_CALLS"; printf "%s\\n" "$TEST_URLS"; return "$TEST_URL_RC"; }\
+job_start() { echo "$1" >>"$TEST_JOBS"; }' "$tmpdir/auto-cli.sh"
+export TEST_CALLS="$tmpdir/auto-calls" TEST_JOBS="$tmpdir/auto-jobs"
+export TEST_INTERVAL=1 TEST_SUB_DUE=0 TEST_URLS='https://partial.example/list' TEST_URL_RC=1
+assert_false 'auto-update reports failed URL discovery' sh "$tmpdir/auto-cli.sh" auto-update
+assert_false 'failed discovery does not start a job' test -e "$TEST_JOBS"
+export TEST_URLS='' TEST_URL_RC=0
+sh "$tmpdir/auto-cli.sh" auto-update
+assert_false 'empty URL set does not start a job' test -e "$TEST_JOBS"
+export TEST_URLS='https://example.test/list'
+sh "$tmpdir/auto-cli.sh" auto-update
+assert_eq auto-update "$(cat "$TEST_JOBS")" 'nonempty URL set starts a job'
+rm -f "$TEST_CALLS" "$TEST_JOBS"
+export TEST_INTERVAL=0 TEST_URL_RC=1
+sh "$tmpdir/auto-cli.sh" auto-update
+assert_false 'disabled interval skips URL discovery' test -e "$TEST_CALLS"
+assert_false 'disabled interval starts no job' test -e "$TEST_JOBS"
+export TEST_INTERVAL=1 TEST_SUB_DUE=1
+sh "$tmpdir/auto-cli.sh" auto-update
+assert_false 'due subscription skips URL discovery' test -e "$TEST_CALLS"
+assert_eq auto-update "$(cat "$TEST_JOBS")" 'due subscription starts a job independently'
+pass 'auto-update CLI preserves discovery errors and independent schedules'

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7
+
+- Move the Xray management API to a private Unix socket. For manual upgrades, install XrayWRT core 0.26.5-r2 or newer before updating the app. The installer checks managed core compatibility.
+- Restore LuCI controls after lost job polling, simplify configuration views, and reduce the data loaded by Advanced and Help.
+- Preserve cached lists and scheduled retries when URL discovery fails. Reuse inputs during configuration and firewall reloads.
+- Harden watchdog recovery, subscription staging, and rollback. Document the NetBird routing caveat.
+
 ## 0.1.6
 
 - Add an optional Discord Voice detector for IPv4 in direct-first mode. It uses the existing Xray ingress and respects explicit bypass rules.

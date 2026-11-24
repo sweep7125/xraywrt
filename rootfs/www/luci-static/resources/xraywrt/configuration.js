@@ -20,6 +20,138 @@ const prettyIfSafe = stored => {
 	catch (_) { return stored; }
 };
 
+// Error state with a way forward; the region is busy while it loads.
+const loadError = (e, retry) => {
+	const again = E('button', { class: 'cbi-button', type: 'button' }, text(_('Try again')));
+	again.addEventListener('click', retry);
+	return E('div', { class: 'alert-message error', role: 'alert' }, [
+		E('p', text(_('Cannot load the configuration: %s').format(api.errorText(e)))), again ]);
+};
+const loadingState = box => {
+	box.setAttribute('aria-busy', 'true');
+	box.replaceChildren(E('p', { class: 'spinning' }, text(_('Loading…'))));
+};
+const readConfig = async cmd => {
+	const reply = await (cmd === 'runtime-config' ? api.runtimeConfig() : api.readLarge(cmd));
+	if (typeof reply?.content !== 'string')
+		throw new Error(_('Unexpected response from the router.'));
+	// The editor formats only compact text that JSON.parse cannot damage; see prettyIfSafe.
+	if (cmd === 'runtime-config')
+		try {
+			reply.content = JSON.stringify(JSON.parse(reply.content), null, 2);
+		}
+		catch (_) { /* Show the text as it is. */ }
+	return reply;
+};
+
+function renderEditor(sub) {
+	const readOnly = api.readOnly();
+	const apply = E('button', { 'data-mw-job': '', disabled: api.jobRunning || null, class: 'cbi-button cbi-button-apply' }, text(_('Save config')));
+	const validate = E('button', { class: 'cbi-button', type: 'button' }, text(_('Validate')));
+	// Xray's own answer to Validate; announced, kept until the next check.
+	const checkResult = E('div', { 'aria-live': 'polite' });
+	// The config (up to 8 MiB) loads on the first opening of the editor.
+	const editorBody = E('div', {});
+	const editor = E('div', {}, [
+		(sub.configured ?? !!sub.url) ? E('div', { class: 'alert-message warning' }, text(_('Subscription updates, including automatic ones, replace your edits.'))) : '',
+		E('p', { class: 'mw-muted' }, text(_('Use Xray JSON with outbounds. For several profiles, use an array and choose by remarks on Home. XrayWRT adds router rules. Put router settings under xraywrt.'))),
+		editorBody
+	]);
+	let configArea = null, original = null, loading = null;
+
+	const onBeforeUnload = e => {
+		if (configArea && configArea.value !== original) {
+			e.preventDefault();
+			e.returnValue = '';
+		}
+	};
+	if (typeof window !== 'undefined' && window.addEventListener)
+		window.addEventListener('beforeunload', onBeforeUnload);
+	const dropGuard = () => {
+		if (typeof window !== 'undefined' && window.removeEventListener)
+			window.removeEventListener('beforeunload', onBeforeUnload);
+	};
+	const uploadEdited = async () => {
+		if (new Blob([configArea.value]).size > CONFIG_MAX_BYTES)
+			throw new Error(_('The configuration is larger than 8 MiB.'));
+		return api.upload('xraywrt-config', configArea.value);
+	};
+	apply.addEventListener('click', () => api.busy(apply, async () => {
+		if (configArea.value === original)
+			return api.notify(configNotice('unchanged'));
+		const res = await api.job('save-config', await uploadEdited());
+		dropGuard();
+		api.reloadResult(res, configNotice(res.action));
+	}));
+	// config-check tests the edited config; missing geodata may be installed.
+	validate.addEventListener('click', () => api.busy(validate, async () => {
+		checkResult.replaceChildren(E('p', { class: 'spinning' }, text(_('Checking…'))));
+		let res;
+		try {
+			res = await api.configCheck(await uploadEdited());
+		}
+		catch (e) {
+			checkResult.replaceChildren();
+			throw e;
+		}
+		const output = api.coreError(res.output || '');
+		checkResult.replaceChildren(res.ok
+			? E('div', { class: 'alert-message success' }, text(_('The configuration is valid: Xray accepts it.')))
+			: E('div', { class: 'alert-message error', role: 'alert' }, [
+				E('p', text(api.errorText(res.error || _('The configuration is invalid.')))),
+				...(output ? [ E('pre', { class: 'mw-log' }, text(output)) ] : [])
+			]));
+	}));
+
+	const restore = E('button', { 'data-mw-job': '', disabled: api.jobRunning || null,
+		class: 'cbi-button cbi-button-reset' }, text(_('Restore previous config')));
+	restore.addEventListener('click', async () => {
+		if (restore.disabled || api.jobRunning)
+			return;
+		if (!await api.confirm(_('Restore previous config'), _('Restore the previous config?'), _('Restore previous config'), { danger: true }))
+			return;
+		return api.busy(restore, async () => {
+			const res = await api.job('restore-config');
+			dropGuard();
+			api.reloadResult(res, configNotice(res.action));
+		});
+	});
+	const restoreNote = E('div', { class: 'cbi-value-description' },
+		text(_('Automatic updates will replace the restored configuration again.')));
+	restoreNote.hidden = sub.auto_update === false;
+	const openEditor = () => {
+		if (configArea || loading)
+			return;
+		loadingState(editorBody);
+		loading = readConfig('read-config').then(config => {
+			// LuCI's own monospace textarea (as for code fields on stock pages).
+			const widget = new ui.Textarea(prettyIfSafe(config.content), { id: 'mw-config', monospace: true, wrap: false, rows: 24 }).render();
+			configArea = widget.querySelector('textarea');
+			configArea.classList.add('mw-code');
+			configArea.setAttribute('spellcheck', 'false');
+			// The textarea normalises CRLF; compare against what it holds, not the stored bytes.
+			original = configArea.value;
+			editorBody.replaceChildren(
+				E('label', { class: 'cbi-value-title mw-label', for: 'widget.mw-config' }, text(_('config.json'))),
+				widget,
+				...(readOnly ? [] : [ E('div', { class: 'mw-row' }, [ validate, apply, ...(sub.config_backup ? [ restore ] : []) ]), checkResult ]),
+				...(sub.config_backup && !readOnly ? [ restoreNote ] : []));
+		}).catch(e => {
+			editorBody.replaceChildren(loadError(e, openEditor));
+		}).finally(() => {
+			editorBody.removeAttribute('aria-busy');
+			loading = null;
+		});
+	};
+
+
+	return E('div', { class: 'mw-page' }, [ api.style(), E('div', { class: 'cbi-section' }, [
+		...(!readOnly ? [ E('h3', text(_('Xray config'))),
+			E('p', { class: 'cbi-value-description' }, text(_('Use “Save config” below to apply editor changes.'))),
+			api.toggle(_('Show config editor'), _('Hide config editor'), editor, openEditor) ] : [])
+	]) ]);
+}
+
 return baseclass.extend({
 	load: () => api.read('subscription-json').catch(e => ({ error: e })),
 
@@ -35,6 +167,41 @@ return baseclass.extend({
 					again
 				])
 			]);
+		}
+		if (section === 'editor')
+			return renderEditor(sub);
+		if (section === 'runtime') {
+			// Read-only: what Xray actually runs with, re-read on every opening.
+			// The backend hides secrets (spec 15).
+			const runtime = E('div', {});
+			let runtimeRequest = 0;
+			const openRuntime = () => {
+				// Only the latest opening may fill the view.
+				const request = ++runtimeRequest;
+				loadingState(runtime);
+				readConfig('runtime-config').then(config => {
+					if (request !== runtimeRequest)
+						return;
+					runtime.removeAttribute('aria-busy');
+					const widget = new ui.Textarea(config.content, { id: 'mw-runtime', monospace: true, wrap: false, rows: 24, readonly: true }).render();
+					const area = widget.querySelector('textarea');
+					area.classList.add('mw-code');
+					area.setAttribute('spellcheck', 'false');
+					area.setAttribute('aria-label', _('Configuration passed to Xray'));
+					runtime.replaceChildren(
+						E('p', { class: 'mw-muted' }, text(_('Config passed to Xray, with router rules added. Secrets are masked with ***.'))),
+						...(config.generated === true ? [ E('p', { class: 'mw-muted' }, text(_('XrayWRT is not running; this is what it would pass at start.'))) ] : []),
+						widget);
+				}).catch(e => {
+					if (request !== runtimeRequest)
+						return;
+					runtime.removeAttribute('aria-busy');
+					runtime.replaceChildren(loadError(e, openRuntime));
+				});
+			};
+
+			return E('div', { class: 'mw-page' }, [ api.style(),
+				E('div', { class: 'cbi-section mw-page' }, [ api.toggle(_('Show running config'), _('Hide running config'), runtime, openRuntime) ]) ]);
 		}
 		const readOnly = api.readOnly();
 		// Saved subscriptions; without any, the page is the one-link form.
@@ -65,37 +232,9 @@ return baseclass.extend({
 		describeAuto();
 		const save = E('button', { 'data-mw-job': '', disabled: api.jobRunning || null, class: 'cbi-button cbi-button-save' }, text(sub.url ? _('Save') : _('Connect')));
 		const update = E('button', { 'data-mw-job': '', disabled: api.jobRunning || null, class: 'cbi-button cbi-button-action important' }, text(_('Update now')));
-		const apply = E('button', { 'data-mw-job': '', disabled: api.jobRunning || null, class: 'cbi-button cbi-button-apply' }, text(_('Save configuration')));
-		const validate = E('button', { class: 'cbi-button', type: 'button' }, text(_('Validate')));
-		// Xray's own answer to Validate; announced, kept until the next check.
-		const checkResult = E('div', { 'aria-live': 'polite' });
-		// The config (up to 8 MiB) loads on the first opening of the editor.
-		const editorBody = E('div', {});
-		const editor = E('div', {}, [
-			sub.url ? E('div', { class: 'alert-message warning' }, text(_('Subscription updates, including automatic ones, replace your edits.'))) : '',
-			E('p', { class: 'mw-muted' }, text(_('Xray JSON with outbounds: one configuration or an array. For an array, choose by remarks on Home. XrayWRT adds router inbounds, DNS and service rules. The xraywrt key holds router settings.'))),
-			editorBody
-		]);
-		let configArea = null, original = null, loading = null;
-
-		const onBeforeUnload = e => {
-			if (configArea && configArea.value !== original) {
-				e.preventDefault();
-				e.returnValue = '';
-			}
-		};
-		if (section === 'editor' && typeof window !== 'undefined' && window.addEventListener)
-			window.addEventListener('beforeunload', onBeforeUnload);
-		const dropGuard = () => {
-			if (typeof window !== 'undefined' && window.removeEventListener)
-				window.removeEventListener('beforeunload', onBeforeUnload);
-		};
 
 		const saveSettings = () => api.write('set-subscription', url.value.trim(), auto.checked ? '1' : '0');
 
-		// Confirms run before api.busy: a modal dismissed from outside must not leave job buttons locked.
-		const confirmOverwrite = async () => !(configArea && configArea.value !== original)
-			|| api.confirm(_('Subscription update'), _('Updating replaces your unsaved configuration edits. Continue?'), _('Update'));
 
 		const updateSubscription = async link => {
 			const changed = link !== (sub.url || '');
@@ -109,7 +248,6 @@ return baseclass.extend({
 			catch (e) {
 				throw new Error(e.message + (changed && sub.url ? ' ' + _('The previous link is kept.') : ''));
 			}
-			dropGuard();
 			api.reloadResult(res, api.actionNotice(res.action));
 		};
 
@@ -120,17 +258,10 @@ return baseclass.extend({
 			// No link saved yet: the same job as Connect on Home (download, check, enable and start).
 			if (!sub.url)
 				return api.busy(save, async () => {
-					if (!/^https?:\/\//i.test(link))
-						throw new Error(_('Enter the subscription link that starts with https://'));
-					const res = await api.job('connect', link);
-					dropGuard();
-					await new Promise(resolve => window.setTimeout(resolve, 1500));
-					api.reloadResult(res, _('Subscription connected. XrayWRT is starting.'));
+					await api.connect(link);
 				});
 			const changed = link && link !== (sub.url || '');
 			if (!link && sub.url && !await api.confirm(_('Stop using the subscription?'), _('XrayWRT keeps the current configuration, but it will no longer be updated.'), _('Disable'), { danger: true }))
-				return;
-			if (changed && !await confirmOverwrite())
 				return;
 			return api.busy(save, async () => {
 				if (changed)
@@ -145,62 +276,13 @@ return baseclass.extend({
 			if (update.disabled || api.jobRunning)
 				return;
 			const link = url.value.trim();
-			if (link && !await confirmOverwrite())
-				return;
 			return api.busy(update, async () => {
 				if (!link)
 					throw new Error(_('Enter the subscription link, or press Save to stop using a subscription.'));
 				return updateSubscription(link);
 			});
 		});
-		const uploadEdited = async () => {
-			if (new Blob([configArea.value]).size > CONFIG_MAX_BYTES)
-				throw new Error(_('The configuration is larger than 8 MiB.'));
-			return api.upload('xraywrt-config', configArea.value);
-		};
-		apply.addEventListener('click', () => api.busy(apply, async () => {
-			if (configArea.value === original)
-				return api.notify(configNotice('unchanged'));
-			const res = await api.job('save-config', await uploadEdited());
-			dropGuard();
-			api.reloadResult(res, configNotice(res.action));
-		}));
-		// config-check tests the edited config; missing geodata may be installed.
-		validate.addEventListener('click', () => api.busy(validate, async () => {
-			checkResult.replaceChildren(E('p', { class: 'spinning' }, text(_('Checking…'))));
-			let res;
-			try {
-				res = await api.configCheck(await uploadEdited());
-			}
-			catch (e) {
-				checkResult.replaceChildren();
-				throw e;
-			}
-			const output = api.coreError(res.output || '');
-			checkResult.replaceChildren(res.ok
-				? E('div', { class: 'alert-message success' }, text(_('The configuration is valid: Xray accepts it.')))
-				: E('div', { class: 'alert-message error', role: 'alert' }, [
-					E('p', text(api.errorText(res.error || _('The configuration is invalid.')))),
-					...(output ? [ E('pre', { class: 'mw-log' }, text(output)) ] : [])
-				]));
-		}));
 
-		const restore = E('button', { 'data-mw-job': '', disabled: api.jobRunning || null,
-			class: 'cbi-button cbi-button-reset' }, text(_('Restore the previous configuration')));
-		restore.addEventListener('click', async () => {
-			if (restore.disabled || api.jobRunning)
-				return;
-			if (!await api.confirm(_('Restore the previous configuration'), _('Replace the current configuration with the previous one?'), _('Restore the previous configuration'), { danger: true }))
-				return;
-			return api.busy(restore, async () => {
-				const res = await api.job('restore-config');
-				dropGuard();
-				api.reloadResult(res, configNotice(res.action));
-			});
-		});
-		const restoreNote = E('div', { class: 'cbi-value-description' },
-			text(_('Automatic updates will replace the restored configuration again.')));
-		restoreNote.hidden = !auto.checked;
 		auto.addEventListener('change', () => {
 			if (readOnly || !sub.url || auto.disabled || api.jobRunning)
 				return;
@@ -213,7 +295,6 @@ return baseclass.extend({
 				finally {
 					auto.checked = savedAuto;
 					describeAuto();
-					restoreNote.hidden = !auto.checked;
 				}
 			});
 		});
@@ -278,87 +359,11 @@ return baseclass.extend({
 			});
 		});
 
-		// Error state with a way forward; the region is busy while it loads.
-		const loadError = (e, retry) => {
-			const again = E('button', { class: 'cbi-button', type: 'button' }, text(_('Try again')));
-			again.addEventListener('click', retry);
-			return E('div', { class: 'alert-message error', role: 'alert' }, [
-				E('p', text(_('Cannot load the configuration: %s').format(api.errorText(e)))), again ]);
-		};
-		const loadingState = box => {
-			box.setAttribute('aria-busy', 'true');
-			box.replaceChildren(E('p', { class: 'spinning' }, text(_('Loading…'))));
-		};
-		const readConfig = async cmd => {
-			const reply = await (cmd === 'runtime-config' ? api.runtimeConfig() : api.readLarge(cmd));
-			if (typeof reply?.content !== 'string')
-				throw new Error(_('Unexpected response from the router.'));
-			// The editor formats only compact text that JSON.parse cannot damage; see prettyIfSafe.
-			if (cmd === 'runtime-config')
-				try {
-					reply.content = JSON.stringify(JSON.parse(reply.content), null, 2);
-				}
-				catch (_) { /* Show the text as it is. */ }
-			return reply;
-		};
-		const openEditor = () => {
-			if (configArea || loading)
-				return;
-			loadingState(editorBody);
-			loading = readConfig('read-config').then(config => {
-				// LuCI's own monospace textarea (as for code fields on stock pages).
-				const widget = new ui.Textarea(prettyIfSafe(config.content), { id: 'mw-config', monospace: true, wrap: false, rows: 24 }).render();
-				configArea = widget.querySelector('textarea');
-				configArea.classList.add('mw-code');
-				configArea.setAttribute('spellcheck', 'false');
-				// The textarea normalises CRLF; compare against what it holds, not the stored bytes.
-				original = configArea.value;
-				editorBody.replaceChildren(
-					E('label', { class: 'cbi-value-title mw-label', for: 'widget.mw-config' }, text(_('config.json'))),
-					widget,
-					...(readOnly ? [] : [ E('div', { class: 'mw-row' }, [ validate, apply, ...(sub.config_backup ? [ restore ] : []) ]), checkResult ]),
-					...(sub.config_backup && !readOnly ? [ restoreNote ] : []));
-			}).catch(e => {
-				editorBody.replaceChildren(loadError(e, openEditor));
-			}).finally(() => {
-				editorBody.removeAttribute('aria-busy');
-				loading = null;
-			});
-		};
-
-		// Read-only: what Xray actually runs with, re-read on every opening.
-		// The backend hides secrets (spec 15).
-		const runtime = E('div', {});
-		let runtimeRequest = 0;
-		const openRuntime = () => {
-			// Only the latest opening may fill the view.
-			const request = ++runtimeRequest;
-			loadingState(runtime);
-			readConfig('runtime-config').then(config => {
-				if (request !== runtimeRequest)
-					return;
-				runtime.removeAttribute('aria-busy');
-				const widget = new ui.Textarea(config.content, { id: 'mw-runtime', monospace: true, wrap: false, rows: 24, readonly: true }).render();
-				const area = widget.querySelector('textarea');
-				area.classList.add('mw-code');
-				area.setAttribute('spellcheck', 'false');
-				area.setAttribute('aria-label', _('Configuration passed to Xray'));
-				runtime.replaceChildren(
-					E('p', { class: 'mw-muted' }, text(_('Your configuration with router inbounds, DNS and service rules added, and the xraywrt key removed. Keys, passwords and IDs are hidden as ***.'))),
-					...(config.generated === true ? [ E('p', { class: 'mw-muted' }, text(_('XrayWRT is not running; this is what it would pass at start.'))) ] : []),
-					widget);
-			}).catch(e => {
-				if (request !== runtimeRequest)
-					return;
-				runtime.removeAttribute('aria-busy');
-				runtime.replaceChildren(loadError(e, openRuntime));
-			});
-		};
 
 		return E('div', { class: 'mw-page' }, [
 			api.style(),
 
-			...(section === 'subscription' ? [ E('div', { class: 'cbi-section' }, [
+			E('div', { class: 'cbi-section' }, [
 				...(items.length ? [ subscriptionTable,
 					...(readOnly ? [] : [ E('div', { class: 'cbi-value' }, [
 						E('label', { class: 'cbi-value-title', for: 'mw-add-url' }, text(_('Add subscription'))),
@@ -375,15 +380,7 @@ return baseclass.extend({
 				]) ] : sub.url ? [ E('p', { class: 'mw-muted' }, text(_('No automatic update schedule. Press "Update now" to update manually.'))) ] : []),
 				...(readOnly ? [] : [ E('div', { class: 'cbi-value' }, [ E('label', { class: 'cbi-value-title' }, []),
 					E('div', { class: 'cbi-value-field' }, [ E('div', { class: 'mw-row' }, items.length ? [ update ] : sub.url ? [ save, update ] : [ save ]) ]) ]) ])
-			]) ] : []),
-			// The subscription page has no second block: no empty card.
-			// A card holding only its button has no heading row: mw-page drops the toggle's top margin.
-			...(section === 'subscription' ? [] : [ E('div', { class: section === 'runtime' ? 'cbi-section mw-page' : 'cbi-section' }, [
-				...(section === 'editor' && !readOnly ? [ E('h3', text(_('Xray configuration'))),
-				E('p', { class: 'cbi-value-description' }, text(_('Use "Save configuration" to apply editor changes immediately. "Save & Apply" does not save them.'))),
-				api.toggle(_('Show the configuration editor'), _('Hide the configuration editor'), editor, openEditor) ] : []),
-				...(section === 'runtime' ? [ api.toggle(_('Show the configuration passed to Xray'), _('Hide the configuration passed to Xray'), runtime, openRuntime) ] : [])
-			]) ])
+			])
 		]);
 	},
 

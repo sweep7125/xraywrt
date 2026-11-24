@@ -17,17 +17,15 @@ const callInitList = rpc.declare({ object: 'luci', method: 'getInitList', params
 
 return view.extend({
 	load: () => Promise.all([
-		api.read('profile-json').catch(() => ({})),
-		api.status().catch(() => ({})),
-		api.read('subscription-json').catch(() => ({})),
+		api.read('profile-json', '--compact').catch(() => ({})),
 		callInitList('xraywrt').catch(() => ({}))
-	]),
+	]).then(([ profile, init ]) => [ profile, { netbird: profile.netbird }, profile.subscription || {}, init ]),
 
 	addFooter: () => E([]),
 
 	render: function([ profile, status, sub = {}, init = {} ]) {
 		this.profile = profile || {};
-		const m = new form.Map('xraywrt', _('Advanced'), _('Use subscription settings or set your own values. Overrides apply to the current subscription. "Save & Apply" restarts Xray if the configuration changes.'));
+		const m = new form.Map('xraywrt', _('Advanced'), _('Overrides apply to the current subscription. “Save & Apply” restarts Xray when needed.'));
 		const s = m.section(form.NamedSection, 'settings', 'settings');
 		s.tab('routing', _('Routing'));
 		s.tab('dns', _('DNS'));
@@ -54,26 +52,25 @@ return view.extend({
 			: _('Keep external IPv6 of client devices from reaching the internet without the VPN.'), '0');
 		if (proxyFirst)
 			ipv6Flag.readonly = true;
-		flag('routing', 'discord_voice', _('Discord Voice'), _('Send recognized Discord Voice traffic through Xray in direct-first mode. Requires conntrack accounting.'));
+		flag('routing', 'discord_voice', _('Discord Voice'), _('Send detected Discord calls through Xray in direct-first mode. Requires conntrack accounting.'));
 		flag('routing', 'disable_quic', _('Block QUIC for VPN traffic'), _('Disables HTTP/3 so sites work more reliably through the VPN.'));
 		flag('routing', 'bypass_ntp', _('Time sync without Xray'), _('Time sync (NTP) works even when the VPN is down.'));
 		// Only for routers that have NetBird (or already use the option).
 		if (status.netbird || uci.get('xraywrt', 'settings', 'netbird_proxy') === '1') {
-			o = s.taboption('routing', form.Flag, 'netbird_proxy', _('Route outbound NetBird through VPN'), _('Outbound NetBird connections are handed to the VPN, which applies your rules.'));
+			o = s.taboption('routing', form.Flag, 'netbird_proxy', _('Route outbound NetBird through VPN'), _('Applies your VPN rules to outgoing NetBird traffic. Running NetBird on this router can also disrupt IPv4 connections from your devices through Xray in either traffic mode.'));
 			o.default = '0';
 			o.rmempty = false;
 		}
 
 		// DNS
-		flag('dns', 'dns_hijack', _('Redirect client DNS to the router'), _('The router answers plain DNS requests, even to servers set on devices. Encrypted DNS (DoH/DoT) is not intercepted.'));
-		flag('dns', 'block_https_svcb', _('Do not forward HTTPS/SVCB'), _('Returns empty answers for whole HTTPS and SVCB records, not only ECH, when forwarding other DNS query types. When disabled, bare FakeDNS still blocks HTTPS/SVCB; scoped FakeDNS still blocks raw queries for matching names.'), '0');
+		flag('dns', 'dns_hijack', _('Hijack DNS'), _('Send plain DNS to the router. Encrypted DNS (DoH/DoT) stays untouched.'));
 		// One control over three UCI keys (dns_forward_other_types, dns_raw_via, dns_raw_upstream); only this select is shown for the flag.
 		// A non-empty dns_raw_via forwards in both modes; the flag only in direct-first.
 		const forwardKey = 'dns_forward_other_types';
 		const providerForward = (this.profile.provider || {})[forwardKey];
 		const providerForwardsDirectly = providerForward === '1' && !proxyFirst;
 		const lostTag = this.profile.dns_raw_lost || '';
-		const other = s.taboption('dns', form.ListValue, '_dns_other', _('Other DNS query types (TXT, SRV, MX…)'), _('Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Raw forwarding sends ordinary DNS to an IP:port, not DoH. Direct forwarding exposes these queries to your internet provider.'));
+		const other = s.taboption('dns', form.ListValue, '_dns_other', _('Other DNS queries (TXT, SRV, MX…)'), _('Xray handles A and AAAA. Choose where to send other queries. Direct forwarding uses plain DNS visible to your internet provider.'));
 		if (lostTag) {
 			// LuCI descriptions accept strings only; render the text-only warning beside the widget.
 			const renderOther = other.renderWidget;
@@ -81,9 +78,9 @@ return view.extend({
 				return E('div', {}, [ renderOther.apply(this, arguments), E('p', { class: 'alert-message warning' }, text(_('Forwarding of other DNS query types was turned off because outbound "%s" became unavailable. Choose an outbound to re-enable it, or leave forwarding off.').format(lostTag))) ]);
 			};
 		}
-		other.value('off', _('Do not forward'));
 		if (providerForward != null && !lostTag)
-			other.value('provider', _('As in the configuration: %s').format(providerForwardsDirectly ? _('Forward directly') : _('Do not forward')));
+			other.value('provider', _('From subscription: %s').format(providerForwardsDirectly ? _('Forward directly') : _('Do not forward')));
+		other.value('off', _('Do not forward'));
 		if (!proxyFirst && !lostTag)
 			other.value('direct', _('Forward directly'));
 		other.value('via', _('Forward through the VPN'));
@@ -122,7 +119,7 @@ return view.extend({
 				return changed;
 			};
 		};
-		o = s.taboption('dns', form.Value, 'dns_raw_upstream', _('DNS server for these queries'), _('IP[:port]. Required through the VPN. Direct: empty uses the first DNS server of the internet connection.'));
+		o = s.taboption('dns', form.Value, 'dns_raw_upstream', _('DNS server for these queries'), _('Use IP, IPv4:port or [IPv6]:port. Required via VPN. For direct forwarding, leave blank to use your connection’s DNS.'));
 		o.optional = true;
 		o.validate = function(sid, value) {
 			if (!this.isActive(sid)) return true;
@@ -167,9 +164,10 @@ return view.extend({
 			return !this.isActive(sid) || !!tagFromValue(value) || _('Choose an available outbound from the configuration.');
 		};
 		clearInactiveError(o);
+		flag('dns', 'block_https_svcb', _('Block HTTPS/SVCB queries'), _('Return empty HTTPS/SVCB answers when forwarding other DNS queries. FakeDNS can still block forwarding for its domains.'), '0');
 
 		// Nothing is downloaded without a saved link.
-		if (sub.url) flag('core', 'bypass_subscription_dns', _('Download the subscription directly'), _('Downloads the subscription directly, even when the VPN is down.'));
+		if (sub.configured ?? !!sub.url) flag('core', 'bypass_subscription_dns', _('Download the subscription directly'), _('Downloads the subscription directly, even when the VPN is down.'));
 
 		// Core
 		api.providerScalar(this.profile, form.ListValue, 'core_log_level', () => {

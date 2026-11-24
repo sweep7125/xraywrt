@@ -49,6 +49,23 @@ test('job buttons lock together through busy preparation and job completion', as
  await tick(timers); await direct;
  assert.deepEqual(buttons.map(b => b.disabled), [false, false, true]);
 });
+test('shared Connect validates, locks through delay, and preserves result warnings', async () => {
+ const button = { disabled: false, hasAttribute: () => true, classList: { add() {}, remove() {} } };
+ const { api, timers } = setup({ document: { querySelectorAll: () => [button] } });
+ const events = [], result = { action: 'saved', warnings: ['warning'] };
+ api.job = async (...args) => { events.push(['job', ...args]); return result; };
+ api.reloadResult = (...args) => events.push(['reload', ...args]);
+ await assert.rejects(api.connect('bad'), /Enter the subscription link/);
+ assert.equal(events.length, 0);
+ const pending = api.busy(button, () => api.connect('https://example.com/sub'));
+ await flush(); assert.equal(button.disabled, true);
+ assert.equal(timers.length, 1); assert.equal(timers[0].ms, 1500);
+ await api.busy(button, () => api.connect('https://example.com/sub'));
+ assert.equal(events.length, 1, 'repeat click cannot start another job');
+ timers.shift().fn(); await pending;
+ assert.deepEqual(events, [['job', 'connect', 'https://example.com/sub'], ['reload', result, 'Subscription connected. XrayWRT is starting.']]);
+ assert.equal(button.disabled, false);
+});
 for (const outcome of ['ok', 'error', 'start-error']) test('job clears old notices on start and running notice on completion: ' + outcome, async () => {
  const notice = { children: ['stale error'], replaceChildren(...children) { this.children = children; } };
  const { api, timers } = setup({ document: { querySelectorAll: selector => selector === '.mw-job' ? [notice] : [] } });
@@ -112,6 +129,15 @@ for (const outcome of ['ok', 'error']) test('jobNotice keeps unsaved edits when 
  assert.equal(api.jobRunning, false, 'job no longer running');
  assert.equal(buttons[0].disabled, false, 'buttons usable to save the edits');
  assert.equal(store['xraywrt-seen-job'], '9-1', 'result shown once');
+});
+test('jobNotice releases controls after lost polling and keeps edits', async () => {
+ const buttons = [{ disabled: false }, { disabled: true }], listeners = {}; let reads = 0, reloads = 0;
+ const { api, timers } = setup({ document: { querySelectorAll: () => buttons, addEventListener: (type, fn) => { listeners[type] = fn; } }, location: { reload: () => reloads++ } });
+ api.read = async () => { if (!reads++) return { id: 'lost', op: 'service', state: 'running' }; throw Error('network down'); };
+ const notice = api.jobNotice(); await flush(); listeners.input();
+ for (let i = 0; i < 5; i++) await tick(timers);
+ assert.equal(api.jobRunning, false); assert.deepEqual(buttons.map(b => b.disabled), [false, true]);
+ assert.equal(reloads, 0); assert.match(notice.children[0].textContent, /Lost connection/);
 });
 test('jobNotice still reloads without edits', async () => {
  const listeners = {}; let reloads = 0, count = 0;
@@ -601,7 +627,7 @@ test('Stop works while another operation holds the job slot', () => {
 });
 test('Connect on the Subscription page is the connect job', () => {
 	const source = h.readSource('rootfs/www/luci-static/resources/xraywrt/configuration.js');
-	assert(/if \(!sub\.url\)\s*return api\.busy\(save, async \(\) => \{[^}]*api\.job\('connect', link\)/.test(source));
+	assert(/if \(!sub\.url\)\s*return api\.busy\(save, async \(\) => \{[^}]*api\.connect\(link\)/.test(source));
 });
 test('overview has no long synchronous operations', () => {
 	assert(!longOperations.test(h.readSource('rootfs/www/luci-static/resources/view/xraywrt/overview.js')));
@@ -664,7 +690,7 @@ test('support report is readable, allowlisted and contains failures only', () =>
  const { api } = setup();
  const secret = 'https://example.com/token uuid=12345678-1234-abcd-ABCD-123456789012 password=secret';
  const report = api.reportText({ status: { version: '1.2.3', core: '26.1', mode: 'direct-first', state: 'failed', core_installed: true, config_valid: false, config_error: secret, last_error: secret, warnings: [secret], errors: [secret] }, diagnostics: { flash_free_kb: 1234, ram_available_kb: 5678, config_test: { output: [secret] } }, checks: [[false, secret, secret]], logs: { available: true, lines: [secret] } });
- for (const value of ['1.2.3', '26.1', 'Only selected sites via VPN', 'Configuration has errors', 'Update the subscription']) assert(report.includes(value), value);
+ for (const value of ['1.2.3', '26.1', 'Only selected sites via VPN', 'Config has errors', 'Update the subscription']) assert(report.includes(value), value);
  for (const value of [secret, 'example.com', 'token', 'secret', '12345678', 'Log:', '{', 'Xray-core']) assert(!report.includes(value), value);
  assert(!report.includes('Press Start on Home.'), 'no misleading start advice when config invalid');
 });

@@ -13,7 +13,7 @@ function checks(st, diagnostics) {
 	if (!st.core_installed)
 		serviceHint = _('Install the Xray core first (Updates page).');
 	else if (st.config_valid === false)
-		serviceHint = _('Fix the configuration first (see the item above), then press Start on Home.');
+		serviceHint = _('Fix the config, then press Start on Home.');
 	else if (state === 'failed')
 		serviceHint = _('Press Start on Home. If it stops again, check the log below.') +
 			(st.last_error ? '\n' + _('Last error: %s').format(api.errorText(st.last_error)) : '');
@@ -27,12 +27,12 @@ function checks(st, diagnostics) {
 		[ coreOk, coreOk ? _('Xray core installed') + (st.core ? ' (%s)'.format(st.core) : '') : _('Xray core is not installed'),
 			_('Open the Updates page and install the core.') ],
 		(!coreOk || st.config_valid == null)
-			? [ null, _('Configuration not checked yet (it is checked at start)'), '' ]
-			: [ st.config_valid, st.config_valid ? _('Configuration is valid') : _('Configuration has errors'),
-				_('Update the subscription or fix the configuration on the Advanced page.') +
+			? [ null, _('Config will be checked at startup'), '' ]
+			: [ st.config_valid, st.config_valid ? _('Config is valid') : _('Config has errors'),
+				_('Update the subscription or fix the config in Advanced.') +
 				(st.config_error ? '\n' + _('Xray says: %s').format(api.coreError(st.config_error)) : '') ],
 		[ st.subscription_configured || null,
-			st.subscription_configured ? _('Subscription configured') : _('No subscription: your own configuration is used'), '' ],
+			st.subscription_configured ? _('Subscription configured') : _('No subscription. Using your config.'), '' ],
 		state === 'starting' ? [ null, _('Starting…'), '' ] : [ up, up ? _('Service is running') : _('XrayWRT is not running'), serviceHint ]
 	];
 	if (st.subscription_insecure)
@@ -113,11 +113,11 @@ function details(st, profile, diagnostics) {
 function configTest(diagnostics) {
 	const test = diagnostics?.config_test;
 	if (test?.valid == null)
-		return E('p', { class: 'mw-muted' }, text(_('Not checked yet: Xray checks the configuration at start.')));
+		return E('p', { class: 'mw-muted' }, text(_('Xray checks the config at startup.')));
 	if (test.valid)
-		return E('p', text(_('Xray accepted the configuration.')));
+		return E('p', text(_('Xray accepted the config.')));
 	return E('div', [
-		E('p', text(_('Xray rejected the configuration:'))),
+		E('p', text(_('Xray rejected the config:'))),
 		E('pre', { class: 'mw-log' }, text((test.output || []).join('\n')))
 	]);
 }
@@ -147,7 +147,7 @@ async function downloadReport(st, profile, diagnostics) {
 return view.extend(api.guardView({
 	load: () => Promise.all([
 		api.read('status-json'),
-		api.read('profile-json').catch(() => ({})),
+		api.read('profile-json', '--compact').catch(() => ({})),
 		api.read('diagnostics-json').catch((e) => ({ unavailable: api.errorText(e) }))
 	]),
 
@@ -204,7 +204,7 @@ return view.extend(api.guardView({
 			E('div', { class: 'cbi-section' }, [ E('h3', text(_('Details'))),
 				st.observatory_signal ? '' : E('div', { class: 'cbi-value-description' }, text(_('The subscription has no server check, so XrayWRT notices a failed server only when DNS stops answering.'))),
 				api.toggle(_('Show details'), _('Hide details'), details(st, profile, diagnostics)) ]),
-			E('div', { class: 'cbi-section' }, [ E('h3', text(_('Last configuration check'))), configTest(diagnostics) ]),
+			E('div', { class: 'cbi-section' }, [ E('h3', text(_('Last config check'))), configTest(diagnostics) ]),
 			E('div', { class: 'cbi-section' }, [ E('h3', text(_('Log'))),
 				api.toggle(_('Show the log'), _('Hide the log'), logBox, loadLog) ])
 		]);

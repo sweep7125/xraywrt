@@ -2,7 +2,7 @@
 
 # bi needs an explicit tag and -json; multiple tags produce separate JSON objects.
 xray_api_bi_raw() {
-	"$XRAY_BIN" api bi --server="$XRAY_API_HOST:$XRAY_API_PORT" --timeout="$XRAY_API_TIMEOUT" -json -- "$1"
+	"$XRAY_BIN" api bi --server="unix:$XRAY_API_SOCKET" --timeout="$XRAY_API_TIMEOUT" -json -- "$1"
 }
 
 xray_api_bi() {
@@ -16,9 +16,9 @@ xray_api_bi() {
 
 xray_api_bo() {
 	if [ -n "$2" ]; then
-		"$XRAY_BIN" api bo --server="$XRAY_API_HOST:$XRAY_API_PORT" --timeout="$XRAY_API_TIMEOUT" -b "$1" -- "$2"
+		"$XRAY_BIN" api bo --server="unix:$XRAY_API_SOCKET" --timeout="$XRAY_API_TIMEOUT" -b "$1" -- "$2"
 	else
-		"$XRAY_BIN" api bo --server="$XRAY_API_HOST:$XRAY_API_PORT" --timeout="$XRAY_API_TIMEOUT" -b "$1" -r
+		"$XRAY_BIN" api bo --server="unix:$XRAY_API_SOCKET" --timeout="$XRAY_API_TIMEOUT" -b "$1" -r
 	fi
 }
 
@@ -31,15 +31,15 @@ xray_api_apply() {
 	rm -f "$added" "$removed"
 	xraywrt-json outbound-delta "$old" "$candidate" "$added" "$removed" || rc=1
 	if [ "$rc" -eq 0 ] && [ -f "$removed" ]; then
-		XRAY_LOCATION_ASSET="$XRAY_SHARE_DIR" "$XRAY_BIN" api rmo --server="$XRAY_API_HOST:$XRAY_API_PORT" --timeout="$XRAY_API_APPLY_TIMEOUT" "$removed" >/dev/null || rc=1
+		XRAY_LOCATION_ASSET="$XRAY_SHARE_DIR" "$XRAY_BIN" api rmo --server="unix:$XRAY_API_SOCKET" --timeout="$XRAY_API_APPLY_TIMEOUT" "$removed" >/dev/null || rc=1
 	fi
 	if [ "$rc" -eq 0 ] && [ -f "$added" ]; then
-		XRAY_LOCATION_ASSET="$XRAY_SHARE_DIR" "$XRAY_BIN" api ado --server="$XRAY_API_HOST:$XRAY_API_PORT" --timeout="$XRAY_API_APPLY_TIMEOUT" "$added" >/dev/null || rc=1
+		XRAY_LOCATION_ASSET="$XRAY_SHARE_DIR" "$XRAY_BIN" api ado --server="unix:$XRAY_API_SOCKET" --timeout="$XRAY_API_APPLY_TIMEOUT" "$added" >/dev/null || rc=1
 	fi
 	rm -f "$added" "$removed"
 	[ "$rc" -eq 0 ] || return 1
 	# No -append: the CLI defaults to shouldAppend=false (rules + balancers).
-	XRAY_LOCATION_ASSET="$XRAY_SHARE_DIR" "$XRAY_BIN" api adrules --server="$XRAY_API_HOST:$XRAY_API_PORT" --timeout="$XRAY_API_APPLY_TIMEOUT" "$candidate" >/dev/null
+	XRAY_LOCATION_ASSET="$XRAY_SHARE_DIR" "$XRAY_BIN" api adrules --server="unix:$XRAY_API_SOCKET" --timeout="$XRAY_API_APPLY_TIMEOUT" "$candidate" >/dev/null
 }
 
 # Spec 16: one bi per balancer; a failing one is marked, the rest stay

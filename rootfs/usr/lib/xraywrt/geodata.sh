@@ -14,9 +14,15 @@ GEODATA_PREPARING=0
 geodata_snapshot() {
 	local file="" snapshot="${1:-$RUNTIME_CONFIG.geodata}"
 
+	set --
 	for file in "$XRAY_SHARE_DIR"/*.dat; do
-		[ ! -f "$file" ] || sha256sum "$file" || return 1
-	done >"$snapshot.tmp.$$"
+		[ ! -f "$file" ] || set -- "$@" "$file"
+	done
+	if [ "$#" -gt 0 ]; then
+		sha256sum "$@" >"$snapshot.tmp.$$" || return 1
+	else
+		: >"$snapshot.tmp.$$" || return 1
+	fi
 	mv -f "$snapshot.tmp.$$" "$snapshot"
 }
 

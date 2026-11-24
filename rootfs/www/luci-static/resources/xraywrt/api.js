@@ -252,7 +252,7 @@ function errorText(res) {
 	return codedErrorText(message) || _('Unknown error');
 }
 
-async function run(bin, args) {
+async function exec(bin, args) {
 	let res;
 	try {
 		res = await fs.exec(bin, args);
@@ -260,6 +260,11 @@ async function run(bin, args) {
 	catch (e) {
 		throw new Error(errorText(e));
 	}
+	return res;
+}
+
+async function run(bin, args) {
+	const res = await exec(bin, args);
 	if (res.code !== 0)
 		throw Object.assign(new Error(errorText(res)), { name: 'CommandError' });
 	return res.stdout || '';
@@ -292,13 +297,7 @@ async function readLarge(cmd, ...args) {
 }
 
 async function checkJson(args) {
-	let res;
-	try {
-		res = await fs.exec(WRITE, args);
-	}
-	catch (e) {
-		throw new Error(errorText(e));
-	}
+	const res = await exec(WRITE, args);
 	try {
 		const reply = JSON.parse(res.stdout || '');
 		if (reply && typeof reply === 'object')
@@ -386,7 +385,7 @@ function reportText(data) {
 	if (!st.core_installed)
 		add(_('Xray core is not installed'), _('Open the Updates page and install the core.'));
 	else if (st.config_valid === false)
-		add(_('Configuration has errors'), _('Update the subscription or fix the configuration on the Advanced page.'));
+		add(_('Config has errors'), _('Update the subscription or fix the config in Advanced.'));
 	else if ((state === 'stopped' || state === 'failed') && !settingsInvalid && !dnsPortBusy)
 		add(_('XrayWRT is not running'), _('Press Start on Home.'));
 	if (st.subscription_insecure)
@@ -715,8 +714,7 @@ return baseclass.extend({
 			const value = name === 'lists_interval' ? intervalLabel(provider[name])
 				: name === 'core_log_level' ? o.vallist[o.keylist.indexOf(provider[name])]
 				: provider[name] === '1' ? _('Enabled') : _('Disabled');
-			choice = _('As provider: %s').format(value);
-			o.description = [ o.description, _('Choosing your own value stops following the provider.') ].filter(Boolean).join(' ');
+			choice = _('From subscription: %s').format(value);
 		}
 		o.value('provider', choice);
 		// Keep the provider choice first, followed by the ordinary choices.
@@ -731,11 +729,11 @@ return baseclass.extend({
 		};
 		o.remove = (sid) => o.write(sid, 'provider');
 		if (generic && overrides().includes(name)) {
-			o.description += ' ' + _('Changed by you.');
+			o.description += ' ' + _('Your override.');
 			const render = o.renderWidget;
 			const api = this;
 			o.renderWidget = function(sid) {
-				const reset = E('button', { type: 'button', class: 'cbi-button cbi-button-reset', disabled: api.jobRunning || null }, text(_('Return to provider settings')));
+				const reset = E('button', { type: 'button', class: 'cbi-button cbi-button-reset', disabled: api.jobRunning || null }, text(_('Use subscription setting')));
 				reset.addEventListener('click', () => api.busy(reset, async () => {
 					o.write(sid, 'provider');
 					await uci.save();
@@ -841,7 +839,7 @@ return baseclass.extend({
 				// A terminal job error still requires fresh page data. A lost
 				// connection does not: keep its recovery message visible.
 				if (e.name !== 'JobError') {
-					alert.textContent = errorText(e);
+					keepEdits(errorText(e));
 					return;
 				}
 				markJobSeen(status.id);
@@ -913,6 +911,13 @@ return baseclass.extend({
 	trafficSummary,
 	safeLink,
 	toggle,
+	connect: async function(link) {
+		if (!/^https?:\/\//i.test(link))
+			throw new Error(_('Enter the subscription link that starts with https://'));
+		const res = await this.job('connect', link);
+		await new Promise(resolve => setTimeout(resolve, 1500));
+		this.reloadResult(res, _('Subscription connected. XrayWRT is starting.'));
+	},
 	busy,
 	notify,
 	style

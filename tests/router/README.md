@@ -31,7 +31,7 @@ Isolated OpenWrt 25.12.6 x86/64 test harness running under native arm64 QEMU TCG
 
 # Run smoke tests
 ./tests/router/run-smoke.sh                 # Baseline proof (kernel, ubus, apk, nftables, procd)
-./tests/router/run-smoke.sh --integration   # Install the app, translation and XrayWRT core 0.26.2 x86_64 VM package, test service lifecycle, nft, DNS, watchdog
+./tests/router/run-smoke.sh --integration   # Install the app, translation and XrayWRT core 0.26.5-r2 x86_64 VM package, test service lifecycle, nft, DNS, watchdog
 XRAY_TEST_CORE=installed ./tests/router/run-smoke.sh --integration   # Keep the guest's installed core (e.g. xraywrt-core) instead of Go Xray
 
 # Synthetic client-IPv6 / coexistence acceptance (guest-only, no real peers)

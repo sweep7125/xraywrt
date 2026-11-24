@@ -199,6 +199,12 @@ core_rollback() {
 		CORE_ERROR="$(code_message core_restore_failed "%s; the previous core could not be restored, run core-update again" "${CORE_ERROR% \[E:*}")"
 		return 1
 	fi
+	core_restore_finish "$restart"
+}
+
+core_restore_finish() {
+	local restart="$1"
+
 	if [ "$restart" = 1 ] && ! core_service_start; then
 		CORE_ERROR="$(code_message core_restore_unready "%s; previous core restored, but it did not start either" "${CORE_ERROR% \[E:*}")"
 		return 1
@@ -218,10 +224,10 @@ core_json_get() {
 }
 
 # Router-only base config for `run -test` while there is no config.json.
-# shortcut: fixed tunnel + freedom JSON, not the generator's router sections
+# shortcut: fixed API, tunnel and freedom JSON, not the generator's router sections
 # (the generator needs provider outbounds); upgrade if the spec names a source.
 core_base_config_write() {
-	printf '{"inbounds":[{"listen":"127.0.0.1","port":%s,"protocol":"tunnel","settings":{"network":"tcp,udp"}}],"outbounds":[{"protocol":"freedom"}]}\n' "$XRAY_DNS_PORT" >"$1"
+	printf '{"api":{"tag":"api","listen":"%s,0600","services":["StatsService"]},"inbounds":[{"listen":"127.0.0.1","port":%s,"protocol":"tunnel","settings":{"network":"tcp,udp"}}],"outbounds":[{"protocol":"freedom"}]}\n' "$XRAY_API_SOCKET" "$XRAY_DNS_PORT" >"$1"
 }
 
 # A package candidate must accept the current runtime before publication.
@@ -446,11 +452,7 @@ core_pkg_restore() {
 		return 1
 	fi
 	rm -f "$CORE_VERSION_CACHE"
-	if [ "$start" = 1 ] && ! core_service_start; then
-		CORE_ERROR="$(code_message core_restore_unready "%s; previous core restored, but it did not start either" "${CORE_ERROR% \[E:*}")"
-		return 1
-	fi
-	CORE_ERROR="$(code_message core_restored "%s, previous core restored" "${CORE_ERROR% \[E:*}")"
+	core_restore_finish "$start"
 }
 
 # One line of a package-manager error output.

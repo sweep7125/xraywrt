@@ -175,6 +175,8 @@ pass 'config test fetches geodata'
  assert_false 'unknown core geodata state requires restart' geodata_unchanged
  printf 'aaaa' >"$XRAY_SHARE_DIR/geosite.dat"
  geodata_snapshot
+ sha256sum "$XRAY_SHARE_DIR/geosite.dat" >"$tmpdir/expected-snapshot"
+ assert_true 'snapshot preserves sha256sum byte format' cmp -s "$tmpdir/expected-snapshot" "$RUNTIME_CONFIG.geodata"
  assert_true 'unchanged core files permit hot apply' geodata_unchanged
  printf 'new category' >"$XRAY_SHARE_DIR/new.dat"
  assert_true 'new un-cached file permits hot apply' geodata_unchanged

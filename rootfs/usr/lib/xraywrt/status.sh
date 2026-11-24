@@ -148,6 +148,7 @@ status_has_balancers() {
 
 # NetBird is on the router: its interface exists or its program is installed.
 status_netbird_present() {
+	case "${NETBIRD_INTERFACE:-$NETBIRD_DEFAULT_IFACE}" in . | ..) have_command netbird; return $? ;; esac
 	[ -d "/sys/class/net/${NETBIRD_INTERFACE:-$NETBIRD_DEFAULT_IFACE}" ] || have_command netbird
 }
 
@@ -229,7 +230,27 @@ provider_list_preview() {
 # Provider profile for the Lists page: mode, DNS, provider settings,
 # the user's overrides and provider list state.
 profile_json() {
-	local preview_unavailable=1 vpn_preview="" direct_preview=""
+	local preview_unavailable=1 vpn_preview="" direct_preview="" configured_url=""
+	if [ "${1:-}" = --compact ]; then
+		set --
+		if settings_load 2>/dev/null; then
+			configured_url="$SUBSCRIPTION_URL"
+			set -- --arg mode "$POLICY_MODE" --arg provider "$(settings_provider_entries)" \
+				--argjson dns_outbounds "$(xraywrt-json dns-outbounds "$XRAY_CONFIG" "$PROFILE_NAME" 2>/dev/null || echo null)" \
+				--arg dns_raw_lost "${DNS_RAW_LOST:-}" --arg dns_raw_via "${DNS_RAW_VIA:-}" \
+				--arg provider_lists "$({ lists_provided dst || lists_provided direct; } && echo 1)" --arg valid 1
+		else
+			NETBIRD_INTERFACE="$(settings_uci_get netbird_interface "$NETBIRD_DEFAULT_IFACE")"
+			is_valid_iface_name "$NETBIRD_INTERFACE" || NETBIRD_INTERFACE="$NETBIRD_DEFAULT_IFACE"
+			configured_url="$(subscription_option "$(settings_uci_get subscription)" url)"
+		fi
+		xraywrt-json build profile-compact "$@" \
+			--arg netbird "$(status_netbird_present && echo 1)" \
+			--arg configured "$([ -n "$configured_url" ] && echo 1)" \
+			--arg backup "$([ -f "$XRAY_CONFIG_BACKUP" ] && echo 1)" \
+			--arg auto "$(settings_uci_get subscription_auto_update 1)"
+		return
+	fi
 	settings_load || return 1
 	if [ -r "$XRAY_CONFIG" ] && [ -r "$PROFILE_FILE" ] &&
 		grep -qx 'profile-schema 1' "$PROFILE_FILE" && grep -qx 'fake-enabled [01]' "$PROFILE_FILE" &&

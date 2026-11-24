@@ -1,6 +1,6 @@
 {
   "api": {
-    "listen": "127.0.0.1:10085",
+    "listen": "/var/run/xraywrt/api.sock,0600",
     "services": [
       "HandlerService",
       "RoutingService",

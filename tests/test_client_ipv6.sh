@@ -155,8 +155,7 @@ pass "shipped default off"
   assert_true "$profile absent equals off" cmp -s "$rules" "$tmpdir/boundary-off.nft"
   assert_file_not_contains "$rules" client_ipv6_egress "$profile off has no boundary chain"
   assert_file_not_contains "$rules" 'iifname @source_ifaces meta nfproto ipv6 return' "$profile off has no client IPv6 guards"
-  grep -v ' api_guard ' "$rules" >"$tmpdir/no-api-guard.nft"
-  assert_file_not_contains "$tmpdir/no-api-guard.nft" 'reject with' "$profile off has no new rejects"
+  assert_file_not_contains "$rules" 'reject with' "$profile off has no new rejects"
   expected='add rule inet xraywrt dns_hijack iifname "wt9" return
 add rule inet xraywrt dns_hijack fib daddr type local return
 add rule inet xraywrt dns_hijack iifname @source_ifaces ip daddr != @localv4 meta l4proto { tcp, udp } th dport 53 redirect to :53

@@ -13,14 +13,14 @@ msgstr "Неожиданный ответ роутера: %s"
 msgid "Unlimited"
 msgstr "Безлимит"
 
-msgid "Configuration is valid"
-msgstr "Конфигурация корректна"
+msgid "Config is valid"
+msgstr "Конфиг в порядке"
 
 msgid "Subscription configured"
 msgstr "Подписка настроена"
 
-msgid "No subscription: your own configuration is used"
-msgstr "Подписки нет: используется ваша конфигурация"
+msgid "No subscription. Using your config."
+msgstr "Подписки нет. Используется ваш конфиг."
 
 msgid "Service is running"
 msgstr "Служба XrayWRT работает"
@@ -253,8 +253,8 @@ msgstr "Скачивает подписку напрямую, даже при с
 msgid "Route outbound NetBird through VPN"
 msgstr "Пускать исходящий NetBird через VPN"
 
-msgid "Outbound NetBird connections are handed to the VPN, which applies your rules."
-msgstr "Исходящие соединения NetBird передаются VPN, дальше действуют ваши правила."
+msgid "Applies your VPN rules to outgoing NetBird traffic. Running NetBird on this router can also disrupt IPv4 connections from your devices through Xray in either traffic mode."
+msgstr "Применяет правила VPN к исходящему трафику NetBird. Если NetBird запущен на роутере, IPv4-соединения устройств через Xray могут прерываться в обоих режимах."
 
 msgid "Remote lists"
 msgstr "Списки по ссылкам"
@@ -283,8 +283,8 @@ msgstr "В поле «%s» неверные строки: %s"
 msgid "Configuration is unchanged."
 msgstr "Конфигурация не изменилась."
 
-msgid "Configuration not checked yet (it is checked at start)"
-msgstr "Конфигурация ещё не проверялась (проверка при запуске)"
+msgid "Config will be checked at startup"
+msgstr "Конфиг проверится при запуске"
 
 msgid "DNS mode"
 msgstr "Режим DNS"
@@ -328,8 +328,8 @@ msgstr "%s (приоритет %s)"
 msgid "(could not read the configuration)"
 msgstr "(не удалось прочитать конфигурацию)"
 
-msgid "Configuration has errors"
-msgstr "В конфигурации есть ошибки"
+msgid "Config has errors"
+msgstr "В конфиге есть ошибки"
 
 msgid "Hide details"
 msgstr "Скрыть подробности"
@@ -586,8 +586,8 @@ msgstr "XrayWRT не запустился. Подробности — в жур�
 msgid "Failed to apply nftables policy: see %s. Restart XrayWRT; if it happens again, see the log on Help."
 msgstr "Не удалось применить правила nftables: см. %s. Перезапустите XrayWRT; если повторится — см. журнал в «Помощи»."
 
-msgid "Fix the configuration first (see the item above), then press Start on Home."
-msgstr "Сначала исправьте конфигурацию (пункт выше), затем нажмите «Запустить» на странице «Главная»."
+msgid "Fix the config, then press Start on Home."
+msgstr "Исправьте конфиг и нажмите «Запустить» на главной."
 
 msgid "Press Start on Home."
 msgstr "Нажмите «Запустить» на странице «Главная»."
@@ -694,17 +694,14 @@ msgstr "Подписка обновлена; XrayWRT перезапущен."
 msgid "Configuration checked and applied; Xray restarted."
 msgstr "Конфигурация проверена и применена; Xray перезапущен."
 
-msgid "Save configuration"
-msgstr "Сохранить конфигурацию"
+msgid "Save config"
+msgstr "Сохранить конфиг"
 
 msgid "Validate"
 msgstr "Проверить"
 
-msgid "Xray JSON with outbounds: one configuration or an array. For an array, choose by remarks on Home. XrayWRT adds router inbounds, DNS and service rules. The xraywrt key holds router settings."
-msgstr "Xray JSON с outbounds: одна конфигурация или массив. Вариант из массива выбирается по remarks на «Главной». XrayWRT добавляет входящие подключения роутера, DNS и служебные правила. Ключ xraywrt — настройки роутера."
-
-msgid "Updating replaces your unsaved configuration edits. Continue?"
-msgstr "Обновление заменит ваши несохранённые правки конфигурации. Продолжить?"
+msgid "Use Xray JSON with outbounds. For several profiles, use an array and choose by remarks on Home. XrayWRT adds router rules. Put router settings under xraywrt."
+msgstr "Используйте JSON Xray с outbounds. Несколько конфигов задайте массивом. На главной они указаны по полю remarks. XrayWRT добавит правила роутера. Настройки роутера задаются в xraywrt."
 
 msgid "XrayWRT keeps the current configuration, but it will no longer be updated."
 msgstr "XrayWRT оставит текущую конфигурацию, но она больше не будет обновляться."
@@ -718,11 +715,11 @@ msgstr "Конфигурация корректна: Xray её принимае�
 msgid "The configuration is invalid."
 msgstr "Конфигурация некорректна."
 
-msgid "Restore the previous configuration"
-msgstr "Вернуть предыдущую конфигурацию"
+msgid "Restore previous config"
+msgstr "Восстановить прошлый конфиг"
 
-msgid "Replace the current configuration with the previous one?"
-msgstr "Заменить текущую конфигурацию предыдущей?"
+msgid "Restore the previous config?"
+msgstr "Восстановить прошлый конфиг?"
 
 msgid "Cannot load the configuration: %s"
 msgstr "Не удалось загрузить конфигурацию: %s"
@@ -733,26 +730,26 @@ msgstr "config.json"
 msgid "Configuration passed to Xray"
 msgstr "Конфигурация, которую получает Xray"
 
-msgid "Your configuration with router inbounds, DNS and service rules added, and the xraywrt key removed. Keys, passwords and IDs are hidden as ***."
-msgstr "Ваша конфигурация с входящими подключениями роутера, DNS и служебными правилами, без ключа xraywrt. Ключи, пароли и идентификаторы скрыты как ***."
+msgid "Config passed to Xray, with router rules added. Secrets are masked with ***."
+msgstr "Конфиг, который получает Xray, с правилами роутера. Секреты скрыты знаками ***."
 
 msgid "Subscription link. Leave empty to use your own configuration."
 msgstr "Ссылка на подписку. Оставьте пустой для своей конфигурации."
 
-msgid "Xray configuration"
-msgstr "Конфигурация Xray"
+msgid "Xray config"
+msgstr "Конфиг Xray"
 
-msgid "Show the configuration editor"
-msgstr "Показать редактор конфигурации"
+msgid "Show config editor"
+msgstr "Показать редактор конфига"
 
-msgid "Hide the configuration editor"
-msgstr "Скрыть редактор конфигурации"
+msgid "Hide config editor"
+msgstr "Скрыть редактор конфига"
 
-msgid "Show the configuration passed to Xray"
-msgstr "Показать конфигурацию, которую получает Xray"
+msgid "Show running config"
+msgstr "Показать рабочий конфиг"
 
-msgid "Hide the configuration passed to Xray"
-msgstr "Скрыть конфигурацию, которую получает Xray"
+msgid "Hide running config"
+msgstr "Скрыть рабочий конфиг"
 
 msgid "Xray core %s is up to date."
 msgstr "Ядро Xray %s актуально."
@@ -868,8 +865,8 @@ msgstr "Ядро Xray не установлено"
 msgid "Open the Updates page and install the core."
 msgstr "Откройте страницу «Обновления» и установите ядро."
 
-msgid "Update the subscription or fix the configuration on the Advanced page."
-msgstr "Обновите подписку или исправьте конфигурацию на странице «Расширенные»."
+msgid "Update the subscription or fix the config in Advanced."
+msgstr "Обновите подписку или исправьте конфиг в дополнительных настройках."
 
 msgid "Xray says: %s"
 msgstr "Сообщение Xray: %s"
@@ -898,17 +895,17 @@ msgstr "Память Xray"
 msgid "XrayWRT temporary files (runtime config, downloads)"
 msgstr "Временные файлы XrayWRT (рабочая конфигурация, загрузки)"
 
-msgid "Not checked yet: Xray checks the configuration at start."
-msgstr "Ещё не проверялась: Xray проверяет конфигурацию при запуске."
+msgid "Xray checks the config at startup."
+msgstr "Xray проверит конфиг при запуске."
 
-msgid "Xray accepted the configuration."
-msgstr "Xray принял конфигурацию."
+msgid "Xray accepted the config."
+msgstr "Xray принял конфиг."
 
-msgid "Xray rejected the configuration:"
-msgstr "Xray не принял конфигурацию:"
+msgid "Xray rejected the config:"
+msgstr "Xray отклонил конфиг:"
 
-msgid "Last configuration check"
-msgstr "Последняя проверка конфигурации"
+msgid "Last config check"
+msgstr "Последняя проверка конфига"
 
 msgid "Paste your subscription link. Settings are applied automatically."
 msgstr "Вставьте ссылку на подписку — настройки применятся автоматически."
@@ -964,20 +961,20 @@ msgstr "DNS"
 msgid "Time sync without Xray"
 msgstr "Синхронизация времени без Xray"
 
-msgid "Redirect client DNS to the router"
-msgstr "Перенаправлять DNS клиентов на роутер"
+msgid "Hijack DNS"
+msgstr "Перехват DNS"
 
-msgid "The router answers plain DNS requests, even to servers set on devices. Encrypted DNS (DoH/DoT) is not intercepted."
-msgstr "Роутер отвечает на обычные DNS-запросы, даже к серверам из настроек устройств. Шифрованный DNS (DoH/DoT) не перехватывается."
+msgid "Send plain DNS to the router. Encrypted DNS (DoH/DoT) stays untouched."
+msgstr "Обычные DNS-запросы идут на роутер. Шифрованный DNS (DoH/DoT) не перехватывается."
 
 msgid "Download the subscription directly"
 msgstr "Скачивать подписку напрямую"
 
-msgid "Other DNS query types (TXT, SRV, MX…)"
-msgstr "Прочие типы DNS-запросов (TXT, SRV, MX…)"
+msgid "Other DNS queries (TXT, SRV, MX…)"
+msgstr "Другие DNS-запросы (TXT, SRV, MX…)"
 
-msgid "Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Raw forwarding sends ordinary DNS to an IP:port, not DoH. Direct forwarding exposes these queries to your internet provider."
-msgstr "Xray отвечает только на запросы A и AAAA. Остальные типы получают пустой ответ, если их не пересылать. Пересылка отправляет обычный DNS на IP:порт, а не DoH. При прямой пересылке эти запросы видны интернет-провайдеру."
+msgid "Xray handles A and AAAA. Choose where to send other queries. Direct forwarding uses plain DNS visible to your internet provider."
+msgstr "Xray обрабатывает A и AAAA. Выберите, куда отправлять остальные запросы. При прямой пересылке обычный DNS виден интернет-провайдеру."
 
 msgid "Do not forward"
 msgstr "Не пересылать"
@@ -991,8 +988,8 @@ msgstr "Пересылать через VPN"
 msgid "DNS server for these queries"
 msgstr "DNS-сервер для этих запросов"
 
-msgid "IP[:port]. Required through the VPN. Direct: empty uses the first DNS server of the internet connection."
-msgstr "IP[:порт]. Для VPN обязателен. Напрямую: пусто — первый DNS-сервер интернет-подключения."
+msgid "Use IP, IPv4:port or [IPv6]:port. Required via VPN. For direct forwarding, leave blank to use your connection’s DNS."
+msgstr "Укажите IP, IPv4:порт или [IPv6]:порт. Через VPN адрес обязателен. При прямой пересылке пустое поле использует DNS подключения."
 
 msgid "Outbound tag"
 msgstr "Тег outbound"
@@ -1078,12 +1075,6 @@ msgstr "Удалить сохранённый закреплённый выхо�
 msgid "Remove"
 msgstr "Удалить"
 
-msgid "As provider: %s"
-msgstr "Как в конфигурации: %s"
-
-msgid "Choosing your own value stops following the provider."
-msgstr "Если выбрать своё значение, изменения из подписки больше не будут применяться."
-
 msgid "Off (only manually)"
 msgstr "Выключено (только вручную)"
 
@@ -1093,8 +1084,8 @@ msgstr "7 дней"
 msgid "%s h"
 msgstr "%s ч"
 
-msgid "Use subscription settings or set your own values. Overrides apply to the current subscription. \"Save & Apply\" restarts Xray if the configuration changes."
-msgstr "Используйте настройки подписки или задайте свои. Ваш выбор сохраняется для текущей подписки. «Сохранить и применить» перезапускает Xray при изменении конфигурации."
+msgid "Overrides apply to the current subscription. “Save & Apply” restarts Xray when needed."
+msgstr "Свои значения действуют для текущей подписки. «Сохранить и применить» перезапускает Xray при необходимости."
 
 msgid "One server, nothing to choose"
 msgstr "Один сервер, выбирать нечего"
@@ -1222,14 +1213,14 @@ msgstr "Сбросить"
 msgid "What goes via VPN"
 msgstr "Что идёт через VPN"
 
-msgid "Changed by you."
-msgstr "Изменено вами."
+msgid "Your override."
+msgstr "Ваше значение."
 
 msgid "Internet traffic goes directly until the VPN recovers."
 msgstr "Интернет работает напрямую, пока VPN не восстановится."
 
-msgid "Return to provider settings"
-msgstr "Вернуть настройки из подписки"
+msgid "Use subscription setting"
+msgstr "Взять из подписки"
 
 msgid "The VPN server is not responding (provider check)"
 msgstr "VPN-сервер не отвечает (проверка по подписке)"
@@ -1387,17 +1378,17 @@ msgstr "Служба"
 msgid "The configuration has no balancers."
 msgstr "В конфигурации нет балансировщиков."
 
-msgid "Use \"Save configuration\" to apply editor changes immediately. \"Save & Apply\" does not save them."
-msgstr "«Сохранить конфигурацию» сразу применяет правки редактора. «Сохранить и применить» их не сохраняет."
+msgid "Use “Save config” below to apply editor changes."
+msgstr "Чтобы применить правки редактора, нажмите «Сохранить конфиг» ниже."
 
 msgid "Auto-update lists"
 msgstr "Автообновление списков"
 
-msgid "As in the configuration: %s"
-msgstr "Как в конфигурации: %s"
+msgid "From subscription: %s"
+msgstr "Из подписки: %s"
 
-msgid "As in the configuration"
-msgstr "Как в конфигурации"
+msgid "From subscription"
+msgstr "Из подписки"
 
 msgid "Start on boot"
 msgstr "Запускать при загрузке роутера"
@@ -1576,20 +1567,20 @@ msgstr "В конфигурации не включено распознаван
 msgid "One rule per line, for example:"
 msgstr "Одно правило в строке, например:"
 
-msgid "a site and its subdomains, straight to the internet"
-msgstr "сайт и его поддомены, сразу в интернет"
+msgid "Site and subdomains, direct"
+msgstr "Сайт и поддомены, напрямую"
 
-msgid "a category from geosite.dat, the rules of the subscription decide"
-msgstr "категория из geosite.dat, решают правила подписки"
+msgid "Site category, follow the subscription"
+msgstr "Категория сайтов, по правилам подписки"
 
-msgid "only this exact name, through a server or balancer of your configuration"
-msgstr "только это имя, через сервер или балансировщик вашей конфигурации"
+msgid "Exact name, via a server or balancer"
+msgstr "Точное имя, через сервер или балансировщик"
 
-msgid "an address or subnet"
-msgstr "адрес или подсеть"
+msgid "IP address or subnet"
+msgstr "IP-адрес или подсеть"
 
-msgid "a link to a list of addresses and subnets"
-msgstr "ссылка на список адресов и подсетей"
+msgid "URL of an IP list"
+msgstr "Ссылка на список IP-адресов"
 
 msgid "Other site forms: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Comments start with #. Saving is refused until every line is valid."
 msgstr "Другие виды сайтов: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Комментарии начинаются с #. Пока есть неверная строка, сохранить нельзя."
@@ -1672,15 +1663,15 @@ msgstr "Отключите другую службу DNS."
 msgid "Line %s of My rules (%s): a site with ports or protocol cannot use core. Use direct or a named target."
 msgstr "Строка %s Моих правил (%s): для сайта с портами или протоколом нельзя использовать core. Выберите direct или именованное направление."
 
-msgid "A site rule with ports or protocol does not capture traffic on its own. Use an address or subnet for exact capture."
-msgstr "Правило сайта с портами или протоколом само по себе не перехватывает трафик. Для точного перехвата используйте адрес или подсеть."
+msgid "Site rules with ports or a protocol apply to traffic Xray already sees. Use an IP or subnet to capture it."
+msgstr "Правила сайтов с портом или протоколом действуют на трафик, который уже видит Xray. Для перехвата укажите IP-адрес или подсеть."
 
-msgid "Append ;ports or ;ports;tcp/udp to a site, address or list link; use ;;udp for all UDP ports. Site selectors cannot use core. Semicolons in regexp: remain part of the expression, not selectors."
-msgstr "Добавьте ;ports или ;ports;tcp/udp к сайту, адресу или ссылке на список; ;;udp означает все порты UDP. Для сайтов с такими условиями нельзя использовать core. Точки с запятой в regexp: остаются частью выражения, а не условиями."
+msgid "Add ;443;tcp for TCP port 443 or ;;udp for any UDP port. For sites with a port or protocol, use direct or a named target. In regexp:, semicolons are part of the pattern."
+msgstr "Добавьте ;443;tcp для порта 443 TCP или ;;udp для любого порта UDP. Для сайта с портом или протоколом укажите direct или имя цели. В regexp: точка с запятой остаётся частью шаблона."
 
 
-msgid "A site core rule does not stop later routes with overlapping different site matchers. Avoid that overlap when the subscription should decide."
-msgstr "Правило сайта с core не останавливает последующие маршруты с другими пересекающимися условиями сайта. Избегайте такого пересечения, если выбор должен делать конфиг подписки."
+msgid "Overlapping site rules can still apply after core. Avoid overlaps to let the subscription decide."
+msgstr "После core могут сработать другие правила для того же сайта. Чтобы выбор остался за подпиской, избегайте пересечений."
 
 msgid "Qualified named address selectors incompatible with sniffing were skipped. Specify a safe protocol or use direct or core."
 msgstr "Адресные правила с именованной целью и уточнениями, несовместимые с распознаванием трафика, пропущены. Укажите безопасный протокол или используйте direct либо core."
@@ -1689,11 +1680,11 @@ msgid "Rules for %s stay saved but some are not applied because Xray may replace
 msgstr "Правила для %s остаются сохранёнными, но некоторые не применяются, потому что Xray может заменить IP-адрес назначения именем сайта."
 
 
-msgid "Do not forward HTTPS/SVCB"
-msgstr "Не пересылать HTTPS/SVCB"
+msgid "Block HTTPS/SVCB queries"
+msgstr "Блокировать запросы HTTPS/SVCB"
 
-msgid "Returns empty answers for whole HTTPS and SVCB records, not only ECH, when forwarding other DNS query types. When disabled, bare FakeDNS still blocks HTTPS/SVCB; scoped FakeDNS still blocks raw queries for matching names."
-msgstr "При пересылке других типов DNS-запросов возвращает пустой ответ для целых записей HTTPS и SVCB, а не только ECH. При отключении этого параметра FakeDNS без ограничений по-прежнему блокирует HTTPS/SVCB, а FakeDNS с ограничениями — пересылку необработанных запросов для соответствующих имён."
+msgid "Return empty HTTPS/SVCB answers when forwarding other DNS queries. FakeDNS can still block forwarding for its domains."
+msgstr "Возвращает пустой ответ на HTTPS/SVCB при пересылке других DNS-запросов. FakeDNS может блокировать пересылку для своих доменов и без этой настройки."
 
 msgid "Direct devices bypass VPN rules, but client IPv6 blocking still applies."
 msgstr "Устройства напрямую обходят правила VPN, но блокировка IPv6 для клиентов продолжает действовать."
@@ -1701,8 +1692,8 @@ msgstr "Устройства напрямую обходят правила VPN,
 msgid "Discord Voice"
 msgstr "Голос Discord"
 
-msgid "Send recognized Discord Voice traffic through Xray in direct-first mode. Requires conntrack accounting."
-msgstr "Направлять распознанный голосовой трафик Discord через Xray в режиме прямого доступа по умолчанию. Требуется учёт соединений conntrack."
+msgid "Send detected Discord calls through Xray in direct-first mode. Requires conntrack accounting."
+msgstr "Направляет распознанные звонки Discord через Xray в режиме «Только выбранное через VPN». Нужен учёт соединений (conntrack)."
 
 msgid "Discord Voice inactive: enable conntrack accounting if needed (nf_conntrack_acct=1) and reload XrayWRT."
 msgstr "Голос Discord не активен: при необходимости включите учёт соединений (nf_conntrack_acct=1) и перезагрузите XrayWRT."

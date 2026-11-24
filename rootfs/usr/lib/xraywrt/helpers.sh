@@ -75,11 +75,6 @@ atomic_copy() {
 	return 1
 }
 
-# Collapse a value to one printable line (used for HTTP header metadata).
-single_line() {
-	tr '\r\n\t' '   ' | tr -d '\000-\037' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
-}
-
 uci_get() {
 	local value=""
 

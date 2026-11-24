@@ -85,6 +85,12 @@ h.evaluateLuCIModule = (relPath, globals = {}) => {
  }
  return result;
 };
+// The real entrypoints request one section; runtime must not inspect subscription data.
+{
+ const direct = origEvaluate('rootfs/www/luci-static/resources/xraywrt/configuration.js', { E, ui, api: { text: x => [x], style: () => E('style'), toggle: () => E('div'), readOnly: () => false } }).module;
+ const sub = { get subscriptions() { throw Error('runtime built subscription controls'); } };
+ direct.render(sub, 'runtime');
+}
 // UX task 8: six visible views; the old page URLs have no aliases.
 {
  const fs = require('fs');
@@ -99,7 +105,11 @@ h.evaluateLuCIModule = (relPath, globals = {}) => {
  }
  h.assert(!fs.existsSync(path.join(process.argv[2], 'rootfs/www/luci-static/resources/view/xraywrt/balancers.js')), 'no balancers page');
 }
-const api = h.evaluateLuCIModule('rootfs/www/luci-static/resources/xraywrt/api.js', { E, ui, fs: {} }).module;
+const connectDelays = [];
+const api = h.evaluateLuCIModule('rootfs/www/luci-static/resources/xraywrt/api.js', { E, ui, fs: {}, setTimeout: (fn, ms) => { connectDelays.push(ms); setTimeout(fn, 0); } }).module;
+const isolatedConfig = origEvaluate('rootfs/www/luci-static/resources/xraywrt/configuration.js', { E, ui, api }).module;
+isolatedConfig.render({ get subscriptions() { throw Error('editor built subscription controls'); } }, 'editor');
+isolatedConfig.render({ get config_backup() { throw Error('subscription built editor controls'); } }, 'subscription');
 h.assertEq(api.trafficSummary({ upload: 1024, download: 1024 }), '2.0 KB / Unlimited', 'missing total is unlimited');
 h.assertEq(api.trafficSummary({ upload: 0, download: 512, total: 2048 }), '512 B / 2.0 KB', 'usage and total');
 h.assertEq(api.trafficSummary({}), 'Unlimited', 'no usage, no total');
@@ -319,10 +329,23 @@ seq(async () => {
   await sv.render([profile, status, sub, init]);
   return sv.map.options;
  };
+ const compactReads = [], compactProfile = { mode: 'direct-first', provider: {}, netbird: true, subscription: { configured: true, config_backup: true, auto_update: false } };
+ const compactView = h.evaluateLuCIModule('rootfs/www/luci-static/resources/view/xraywrt/advanced.js', {
+  E, api: { ...apiU, jobNotice: () => E('div'), read: async (...args) => { compactReads.push(args); return compactProfile; } },
+  view: { extend: v => v }, form, uci, widgets: { DeviceSelect: Option }, validation: dnsPlatform,
+  rpc: { declare: () => async () => ({ xraywrt: { enabled: true } }) }
+ }).module;
+ const compactPage = await compactView.render(await compactView.load());
+ h.assertEq(JSON.stringify(compactReads), '[["profile-json","--compact"]]', 'Advanced loads only compact profile');
+ h.assert(compactView.map.options.netbird_proxy && compactView.map.options.bypass_subscription_dns, 'compact flags retain Advanced options');
+ h.assert(texts(compactPage).includes('Subscription updates, including automatic ones, replace your edits.'), 'configured flag retains editor warning');
+ const partialPage = await compactView.render([{ netbird: true, subscription: compactProfile.subscription }, { netbird: true }, compactProfile.subscription, {}]);
+ h.assert(compactView.map.options.netbird_proxy && compactView.map.options.bypass_subscription_dns, 'partial compact result keeps independent options');
+ h.assert(texts(partialPage).includes('Subscription updates, including automatic ones, replace your edits.'), 'partial compact result keeps editor warning');
  let opts = await renderSettings({ mode: 'direct-first', provider: { disable_quic: '0', mode: 'direct-first' } }, { netbird: true });
  // Spec 13 groups; every UCI option of the table that the UI edits sits in its group.
  const groups = { routing: ['source_network_interfaces', 'block_client_ipv6', 'discord_voice', 'disable_quic', 'bypass_ntp', 'netbird_proxy'],
-  dns: ['dns_hijack', 'block_https_svcb', '_dns_other', 'dns_raw_upstream', 'dns_raw_via'],
+  dns: ['dns_hijack', '_dns_other', 'dns_raw_upstream', 'dns_raw_via', 'block_https_svcb'],
   core: ['core_log_level', 'bypass_subscription_dns', '_boot'] };
  h.assert(!(await renderSettings({ mode: 'direct-first' }, {}, {})).bypass_subscription_dns, 'no direct subscription download option without a saved link');
  h.assert(!opts.subscription_auto_update && !opts._subscription_url, 'no duplicate subscription settings');
@@ -347,11 +370,13 @@ seq(async () => {
  h.assert(!opts.mihomo_log_level && !opts.dashboard, 'no Mihomo-only options');
  h.assertEq(sv.map.options && Object.keys(opts).filter(k => opts[k].tab === 'dns').join(' '), groups.dns.join(' '), 'DNS tab order');
  h.assert(!opts.dns_upstream, 'no DNS servers for Xray option: provider dns.servers or the WAN DNS');
- h.assertEq(opts.dns_hijack.description, 'The router answers plain DNS requests, even to servers set on devices. Encrypted DNS (DoH/DoT) is not intercepted.', 'DNS caveat is explicit');
- h.assertEq(opts.netbird_proxy.description, 'Outbound NetBird connections are handed to the VPN, which applies your rules.', 'NetBird follows rules');
+ h.assert(opts.dns_hijack.description.includes('DoH/DoT'), 'DNS caveat is explicit');
+ h.assert(opts.netbird_proxy.description.includes('through Xray in either traffic mode'), 'NetBird warns about both traffic modes');
  h.assert(!opts.dns_forward_other_types, 'the old flag is replaced by one select');
  h.assertEq(opts.block_https_svcb.default, '0', 'HTTPS/SVCB blocking defaults off');
- h.assert(opts.block_https_svcb.description.includes('whole HTTPS and SVCB records, not only ECH'), 'whole-record warning');
+ h.assert(opts.block_https_svcb.description.includes('empty HTTPS/SVCB answers'), 'whole-record warning');
+ h.assertEq(opts.block_https_svcb.values.length, 0, 'HTTPS/SVCB without subscription flag is a checkbox');
+ h.assertEq(opts.discord_voice.values.length, 0, 'Discord Voice without subscription flag is a checkbox');
  h.assert(!opts.dns_refuse_other_types, 'no refuse option (spec 7.5)');
  h.assert(!opts.fake_domains_source, 'fake-IP source belongs on Lists');
  h.assertEq(opts.core_log_level.default, 'warning', 'core log level default');
@@ -369,6 +394,7 @@ seq(async () => {
 
 
  opts = await renderSettings({ mode: 'direct-first', provider: { discord_voice: '1' } });
+ h.assertEq(opts.discord_voice.values[0][1], 'From subscription: Enabled', 'Discord subscription choice comes first');
  h.assertEq(opts.discord_voice.cfgvalue(), 'provider', 'Discord Voice follows provider');
  opts.discord_voice.write('settings', '0');
  h.assert(overrides.includes('discord_voice'), 'Discord Voice explicit off overrides provider');
@@ -377,6 +403,7 @@ seq(async () => {
  opts = await renderSettings({ mode: 'proxy-first', provider: { discord_voice: '1' } });
  h.assertEq(opts.discord_voice.cfgvalue(), 'provider', 'proxy-first preserves provider preference');
  opts = await renderSettings({ mode: 'direct-first', provider: { block_https_svcb: '1' } });
+ h.assertEq(opts.block_https_svcb.values[0][1], 'From subscription: Enabled', 'HTTPS/SVCB subscription choice comes first');
  h.assertEq(opts.block_https_svcb.cfgvalue(), 'provider', 'HTTPS/SVCB follows provider');
  opts.block_https_svcb.write('settings', '0');
  h.assertEq(ownSettings.block_https_svcb, '0', 'HTTPS/SVCB explicit off is saved');
@@ -397,8 +424,8 @@ seq(async () => {
  const flagKey = 'dns_forward_other_types';
  const dfProvider = (v) => ({ mode: 'direct-first', provider: { [flagKey]: v } });
  opts = await dnsOther({ mode: 'direct-first' });
- h.assertEq(opts._dns_other.title, 'Other DNS query types (TXT, SRV, MX…)', 'select title');
- h.assertEq(opts._dns_other.description, 'Xray answers only A and AAAA. Other types get an empty answer unless you forward them. Raw forwarding sends ordinary DNS to an IP:port, not DoH. Direct forwarding exposes these queries to your internet provider.', 'privacy warning wraps in description');
+ h.assertEq(opts._dns_other.title, 'Other DNS queries (TXT, SRV, MX…)', 'select title');
+ h.assertEq(opts._dns_other.description, 'Xray handles A and AAAA. Choose where to send other queries. Direct forwarding uses plain DNS visible to your internet provider.', 'privacy warning wraps in description');
  h.assertEq(JSON.stringify(opts._dns_other.values), '[["off","Do not forward"],["direct","Forward directly"],["via","Forward through the VPN"]]', 'short direct-first choices');
 
 
@@ -416,12 +443,12 @@ seq(async () => {
  h.assertEq(opts._dns_other.cfgvalue(), 'via', 'load: a tag in proxy-first');
  opts = await dnsOther(dfProvider('0'), { [flagKey]: '1' });
  h.assertEq(opts._dns_other.cfgvalue(), 'provider', 'load: configuration decides unless overridden');
- h.assertEq(JSON.stringify(opts._dns_other.values[1]), '["provider","As in the configuration: Do not forward"]', 'configuration choice, not forwarding');
+ h.assertEq(JSON.stringify(opts._dns_other.values[0]), '["provider","From subscription: Do not forward"]', 'configuration choice, not forwarding');
  opts = await dnsOther(dfProvider('1'));
- h.assertEq(opts._dns_other.values[1][1], 'As in the configuration: Forward directly', 'configuration choice, forwarding');
+ h.assertEq(opts._dns_other.values[0][1], 'From subscription: Forward directly', 'configuration choice, forwarding');
  h.assertEq(JSON.stringify(opts.dns_raw_upstream.dependencies), '[["_dns_other","direct"],["_dns_other","via"],["_dns_other","provider"]]', 'server shown for direct, via and a forwarding configuration');
  opts = await dnsOther({ mode: 'proxy-first', provider: { [flagKey]: '1' } });
- h.assertEq(opts._dns_other.values[1][1], 'As in the configuration: Do not forward', 'configuration flag has no effect in proxy-first');
+ h.assertEq(opts._dns_other.values[0][1], 'From subscription: Do not forward', 'configuration flag has no effect in proxy-first');
  opts = await dnsOther(dfProvider('0'), { [flagKey]: '1' }, [flagKey]);
  h.assertEq(opts._dns_other.cfgvalue(), 'direct', 'load: own forwarding over the configuration');
  opts = await dnsOther(dfProvider('1'), { [flagKey]: '0' }, [flagKey]);
@@ -539,7 +566,7 @@ seq(async () => {
   'settings', false, 0, opts._dns_other.renderWidget('settings', 0, 'off'));
  const renderedWarning = collect(rendered).find(node => node.attrs.class === 'alert-message warning');
  h.assert(renderedWarning && texts(renderedWarning).some(line => line.includes(lostTag) && line.includes('Choose an outbound')), 'real LuCI option frame renders exact lost-tag warning as text');
- h.assert(collect(rendered).some(node => node.attrs.class === 'cbi-value-description' && texts(node).some(line => line.includes('Direct forwarding exposes'))), 'real LuCI preserves normal DNS forwarding description while latched');
+ h.assert(collect(rendered).some(node => node.attrs.class === 'cbi-value-description' && texts(node).some(line => line.includes('Direct forwarding'))), 'real LuCI preserves normal DNS forwarding description while latched');
  opts._dns_other.write('settings', 'off');
  h.assertEq(ownSettings.dns_raw_lost, lostTag, 'unrelated save cannot acknowledge lost outbound warning');
  h.assertEq(ownSettings[flagKey], '0', 'unrelated save keeps explicit off');
@@ -587,7 +614,7 @@ seq(async () => {
  opts = await renderSettings({ mode: 'direct-first', provider: { disable_quic: '0', mode: 'direct-first' } });
  // Provider values and own choices share one labelled dropdown.
  h.assertEq(opts.disable_quic.cfgvalue('settings'), 'provider', 'provider selected without override');
- h.assertEq(JSON.stringify(opts.disable_quic.values), JSON.stringify([['provider', 'As provider: Disabled'], ['1', 'Enabled'], ['0', 'Disabled']]), 'provider and own flag choices');
+ h.assertEq(JSON.stringify(opts.disable_quic.values), JSON.stringify([['provider', 'From subscription: Disabled'], ['1', 'Enabled'], ['0', 'Disabled']]), 'provider and own flag choices');
  h.assertEq(opts.disable_quic.title, 'Block QUIC for VPN traffic', 'normal accessible option title');
  h.assert(!Object.keys(opts).some(k => /^_(own|prov|provoff)_/.test(k)), 'no extra provider rows');
  opts.disable_quic.write('settings', '1');
@@ -613,7 +640,7 @@ seq(async () => {
  const directFirstProfile = { mode: 'direct-first', provider: { disable_quic: '0' }, provider_lists: true, targets: ['proxy', 'pool'] };
  opts = await renderLists(directFirstProfile);
  h.assertEq(opts.mode.cfgvalue(), 'provider', 'mode follows the configuration unless overridden');
- h.assertEq(JSON.stringify(opts.mode.values), '[["provider","As in the configuration: Only selected sites via VPN"],["proxy-first","Everything via VPN except exclusions"],["direct-first","Only selected sites via VPN"]]', 'mode choices');
+ h.assertEq(JSON.stringify(opts.mode.values), '[["provider","From subscription: Only selected sites via VPN"],["proxy-first","Everything via VPN except exclusions"],["direct-first","Only selected sites via VPN"]]', 'mode choices');
  h.assertEq(opts.mode.description, 'Only the addresses and devices below, plus the sites your subscription selects, go via VPN; everything else goes direct.', 'direct-first meaning is the description');
  h.assertEq(opts.mode.title, 'Traffic mode', 'mode title has its own msgid');
  h.assert(!opts._mode && !texts(api.style()).join('').includes('mw-mode'), 'no custom mode control');
@@ -654,16 +681,16 @@ seq(async () => {
  h.assertEq(JSON.stringify(providerProxy._src.dependencies), '[["mode","direct-first"]]', 'devices via VPN do not follow a proxy-first configuration');
  const proxyFirstLists = await renderLists({ mode: 'proxy-first', provider: {}, lists: {} });
  h.assertEq(proxyFirstLists.mode.description, 'Everything goes via VPN except the addresses and devices below.', 'proxy-first meaning is the description');
- h.assertEq(proxyFirstLists.mode.vallist[0], 'As in the configuration: Everything via VPN except exclusions', 'configuration mode in the first choice');
+ h.assertEq(proxyFirstLists.mode.vallist[0], 'From subscription: Everything via VPN except exclusions', 'configuration mode in the first choice');
  // Overridden: the configuration's own mode is shown only when the provider sets it.
  overrides = ['mode']; ownSettings.mode = 'direct-first';
  const overriddenAuto = await renderLists({ mode: 'direct-first', mode_source: 'user', provider: {}, lists: {} });
- h.assertEq(overriddenAuto.mode.vallist[0], 'As in the configuration', 'unknown configuration mode: no value');
+ h.assertEq(overriddenAuto.mode.vallist[0], 'From subscription', 'unknown configuration mode: no value');
  h.assertEq(overriddenAuto.mode.cfgvalue(), 'direct-first', 'own mode selected');
- h.assertEq((await renderLists({ mode: 'direct-first', mode_source: 'user', provider: { mode: 'proxy-first' }, lists: {} })).mode.vallist[0], 'As in the configuration: Everything via VPN except exclusions', 'provider mode shown while overridden');
+ h.assertEq((await renderLists({ mode: 'direct-first', mode_source: 'user', provider: { mode: 'proxy-first' }, lists: {} })).mode.vallist[0], 'From subscription: Everything via VPN except exclusions', 'provider mode shown while overridden');
  overrides = ['bypass_ntp']; delete ownSettings.mode;
  const interval = await renderLists({ mode: 'proxy-first', provider: { lists_interval: '24' }, lists: {} });
- h.assertEq(interval.lists_interval.vallist[0], 'As provider: 24 h', 'list interval follows the provider like on Advanced');
+ h.assertEq(interval.lists_interval.vallist[0], 'From subscription: 24 h', 'list interval follows the provider like on Advanced');
  h.assert(!interval.lists_interval.readonly, 'list interval is an ordinary dropdown');
  const listWidget = proxyFirstLists._rules.renderWidget();
  const entryButton = findButton(listWidget, 'Entry format');
@@ -723,7 +750,7 @@ seq(async () => {
   h.assertEq(notices.at(-1), 'Subscription is up to date.', 'unchanged update notice');
   h.assert(texts(p).includes('Subscription link. Leave empty to use your own configuration.'), 'subscription URL hint without format jargon');
   h.assert(texts(p).includes('Subscription updates, including automatic ones, replace your edits.'), 'Advanced update warning');
-  h.assert(texts(p).includes('Xray JSON with outbounds: one configuration or an array. For an array, choose by remarks on Home. XrayWRT adds router inbounds, DNS and service rules. The xraywrt key holds router settings.'), 'config format note');
+  h.assert(texts(p).includes('Use Xray JSON with outbounds. For several profiles, use an array and choose by remarks on Home. XrayWRT adds router rules. Put router settings under xraywrt.'), 'config format note');
  }
  // Exercise the widget contract and handlers using the actual returned textarea.
  const yamlUploads = [];
@@ -733,7 +760,7 @@ seq(async () => {
    write: async (...args) => { subCalls.push(args); return { action: 'unchanged' }; }, job: async (...args) => { subCalls.push(args); return { action: 'unchanged' }; }, notify: message => notices.push(message), reloadWithNotice: message => notices.push(message) }
  }).module;
  const yamlPage = await mountSubscription(yamlView, { url: 'https://p.example/sub' });
- await openToggle(yamlPage, 'Show the configuration editor');
+ await openToggle(yamlPage, 'Show config editor');
  const yamlNodes = collect(yamlPage);
  const yaml = yamlNodes.find(n => n.tag === 'textarea');
  h.assertEq(textareaOptions.at(-1)?.monospace, true, 'YAML ui.Textarea monospace');
@@ -743,7 +770,7 @@ seq(async () => {
  h.assert(yaml.attrs.class.split(' ').includes('mw-code'), 'YAML editor class');
  h.assertEq(yaml.value, 'proxies: []\n', 'YAML content initialized');
  yaml.value = 'proxies: []\n# edited';
- await yamlNodes.find(n => n.tag === 'button' && texts(n).includes('Save configuration')).listeners.click();
+ await yamlNodes.find(n => n.tag === 'button' && texts(n).includes('Save config')).listeners.click();
  h.assertEq(yamlUploads.at(-1).join(','), 'xraywrt-config,' + yaml.value, 'apply uploads live YAML textarea value');
  h.assertEq(subCalls.at(-1).join(','), 'save-config,/tmp/yaml', 'apply saves uploaded YAML');
  h.assertEq(notices.at(-1), 'Configuration is unchanged.', 'unchanged apply notice');
@@ -772,7 +799,7 @@ seq(async () => {
  for (const valid of [null, false]) {
   const p = diag.render([Object.assign({}, base, { config_valid: valid, config_error: 'bad yaml', dns_mode: 'redir-host' }), { provider: { disable_quic: '0' }, provider_lists: true }]);
   const t = texts(p);
-  if (valid == null) h.assert(t.includes('Configuration not checked yet (it is checked at start)') && t.includes('–'), 'unknown check neutral');
+  if (valid == null) h.assert(t.includes('Config will be checked at startup') && t.includes('–'), 'unknown check neutral');
   else h.assert(t.some(s => s.includes('bad yaml')), 'last core error shown');
   for (const label of ['Traffic mode','DNS mode','Provider settings','Provider lists']) h.assert(t.includes(label), 'diagnostic detail ' + label);
   { const cells = texts(collect(p).find(n => n.attrs.class === 'mw-grid' && texts(n).includes('Provider lists'))); h.assertEq(cells[cells.indexOf('Provider lists') + 1], 'yes', 'provider lists row reads profile.provider_lists'); }
@@ -817,7 +844,7 @@ seq(async () => {
  const translated = [];
  const dv = h.evaluateLuCIModule('rootfs/www/luci-static/resources/view/xraywrt/help.js', { E, api, view: { extend: v => v }, _: s => { translated.push(s); return s; } }).module;
  const dp = dv.render([{ ...base, config_valid: false, config_error: 'Xray 26.1.1 (Xray, Penetrates Everything.) Custom\nFailed to start: bad proxy in /tmp/xraywrt/config-check.1.json', route: { table: 100, priority: 10 } }, { provider: { dns_hijack: '1', disable_quic: '0' } }]);
- h.assert(texts(dp).includes('Configuration has errors'), 'negative config wording');
+ h.assert(texts(dp).includes('Config has errors'), 'negative config wording');
  h.assert(texts(dp).some(t => t.includes('Xray says: Failed to start: bad proxy') && !t.includes('Penetrates') && !t.includes('/tmp/')), 'core error extraction');
  h.assert(texts(dp).includes('dns_hijack, disable_quic'), 'provider names');
  h.assert(translated.includes('%s (priority %s)'), 'priority translated');
@@ -899,7 +926,7 @@ seq(async () => {
 seq(async () => {
  const calls = [], polls = [];
  let fresh = { running: true, enabled: true, state: 'running', dns_ok: true };
- const notices = [], delays = [];
+ const notices = [], delays = connectDelays;
  const bridge = { ...api, jobRunning: false,
   busy: (button, fn) => fn(),
   balancers: async () => ({ balancers: [] }),
@@ -1148,17 +1175,17 @@ seq(async () => {
  h.assertEq(calls.at(-1).join(','), 'set-subscription,,1', 'Enter without URL saves settings after confirmation');
  // A fresh page registers a guard after the successful update removed the first one.
  const guarded = await mountSubscription(sv, { url: 'https://p.example/sub', config_backup: true });
- await openToggle(guarded, 'Show the configuration editor');
+ await openToggle(guarded, 'Show config editor');
  collect(guarded).find(n => n.tag === 'textarea').value += '# edit';
  const guard = events.beforeunload;
  const event = { preventDefault() { this.prevented = true; } }; guard(event);
  h.assert(event.prevented && event.returnValue === '', 'beforeunload blocks navigation with YAML edits');
  ui.autoConfirm = false;
- await findButton(guarded, 'Restore the previous configuration').listeners.click();
+ await findButton(guarded, 'Restore previous config').listeners.click();
  h.assertEq(events.beforeunload, guard, 'cancel restore retains edit guard');
  const restoreOk = collect(ui.modalCalls.at(-1).children).find(n => n.tag === 'button' && !texts(n).includes('Cancel'));
  h.assert(restoreOk.attrs.class.includes('cbi-button-negative'), 'YAML restore uses destructive modal button');
- await findButton(guarded, 'Save configuration').listeners.click();
+ await findButton(guarded, 'Save config').listeners.click();
  h.assert(!events.beforeunload && removed.includes(guard), 'successful YAML save removes beforeunload guard');
  ui.autoConfirm = true;
  // A modal closed from outside never resolves: it must not have locked the job buttons first.
@@ -1169,11 +1196,11 @@ seq(async () => {
    write: async () => ({}), job: async () => ({ action: 'saved' }), upload: async () => '/tmp/yaml', reloadWithNotice() {}, notify() {} }
  }).module;
  const pending = await mountSubscription(sv2, { url: 'https://p.example/sub', config_backup: true });
- await openToggle(pending, 'Show the configuration editor');
+ await openToggle(pending, 'Show config editor');
  collect(pending).find(n => n.tag === 'textarea').value += '# edit';
  const pendingUrl = collect(pending).find(n => n.attrs.id === 'mw-url');
  ui.autoConfirm = null;
- findButton(pending, 'Restore the previous configuration').listeners.click();
+ findButton(pending, 'Restore previous config').listeners.click();
  pendingUrl.value = '';
  findButton(pending, 'Save').listeners.click();
  await settle();
@@ -1206,29 +1233,29 @@ seq(async () => {
  }).module;
  const render = async (backup = true, auto = true) => {
   const p = await mountSubscription(sv, { url: 'https://old.example', auto_update: auto, config_backup: backup }, { content: 'yaml' });
-  await openToggle(p, 'Show the configuration editor');
+  await openToggle(p, 'Show config editor');
   return p;
  };
  const button = (p, label) => collect(p).find(n => n.tag === 'button' && texts(n).includes(label));
  // C7: one light read; the backup flag comes with the subscription JSON.
  await check('unknown backup keeps editor usable without status-json', async () => {
   const p = await mountSubscription(sv, { url: 'https://old.example' }, { content: 'yaml' });
-  await openToggle(p, 'Show the configuration editor');
+  await openToggle(p, 'Show config editor');
   h.assertEq(reads.calls.join(','), 'subscription-json,read-config', 'no status-json read');
   h.assert(collect(p).some(n => n.tag === 'textarea'), 'editor remains available');
-  h.assert(button(p, 'Save configuration') && button(p, 'Update now'), 'actions remain available');
-  h.assert(!button(p, 'Restore the previous configuration'), 'unknown backup hides restore');
+  h.assert(button(p, 'Save config') && button(p, 'Update now'), 'actions remain available');
+  h.assert(!button(p, 'Restore previous config'), 'unknown backup hides restore');
  });
  await check('malformed YAML response', async () => {
   {
    for (const reply of [{}, { content: null }, { content: 42 }, null]) {
     const p = await mountSubscription(sv, { url: 'https://old.example' }, reply);
-    await openToggle(p, 'Show the configuration editor');
+    await openToggle(p, 'Show config editor');
     h.assert(texts(p).includes('Cannot load the configuration: Unexpected response from the router.'), 'malformed response error');
-    h.assert(!collect(p).some(n => n.tag === 'textarea') && !button(p, 'Save configuration') && !button(p, 'Restore the previous configuration'), 'no unsafe editor actions');
+    h.assert(!collect(p).some(n => n.tag === 'textarea') && !button(p, 'Save config') && !button(p, 'Restore previous config'), 'no unsafe editor actions');
    }
    const empty = await mountSubscription(sv, { url: 'https://old.example' }, { content: '' });
-   await openToggle(empty, 'Show the configuration editor');
+   await openToggle(empty, 'Show config editor');
    h.assert(collect(empty).some(n => n.tag === 'textarea'), 'empty string is valid YAML content');
   }
  });
@@ -1241,7 +1268,7 @@ seq(async () => {
      bridge.job = async () => ({ action });
      const before = reloads;
      const edited = await render(); collect(edited).find(n => n.tag === 'textarea').value += ' ';
-     await button(edited, 'Save configuration').listeners.click();
+     await button(edited, 'Save config').listeners.click();
      h.assertEq(reloads, before + 1, 'successful apply reloads');
      h.assertEq(applyEvents.join(','), 'notice,reload', 'notice before reload');
      h.assertEq(JSON.stringify(restoreNotices), JSON.stringify([msg]), 'apply notice ' + action);
@@ -1252,28 +1279,28 @@ seq(async () => {
  await check('apply large YAML and byte limit', async () => {
   const p = await render(), yaml = collect(p).find(n => n.tag === 'textarea');
   yaml.value = 'x'.repeat(1572864); calls = [];
-  await button(p, 'Save configuration').listeners.click();
+  await button(p, 'Save config').listeners.click();
   h.assertEq(calls[0][0], 'upload', 'upload first'); h.assertEq(calls[0][1], 'xraywrt-config', 'upload prefix');
   h.assertEq(calls[0][2], yaml.value, 'full large content');
   h.assertEq(calls[1].join(','), 'job,save-config,/tmp/xraywrt-config.test', 'save as job');
   for (const content of ['x'.repeat(8388609), 'я'.repeat(4194305)]) {
    yaml.value = content; calls = []; let error = '';
-   try { await button(p, 'Save configuration').listeners.click(); } catch(e) { error = e.message; }
+   try { await button(p, 'Save config').listeners.click(); } catch(e) { error = e.message; }
    h.assertEq(error, 'The configuration is larger than 8 MiB.', 'byte limit message'); h.assertEq(calls.length, 0, 'oversize not uploaded');
   }
-  yaml.value = 'x'.repeat(8388608); calls = []; await button(p, 'Save configuration').listeners.click();
+  yaml.value = 'x'.repeat(8388608); calls = []; await button(p, 'Save config').listeners.click();
   h.assertEq(calls[0][0], 'upload', 'exact limit accepted');
  });
  await check('editor actions share one row, notice after the heading', async () => {
   const p = await render();
-  const row = collect(p).find(n => n.attrs.class === 'mw-row' && n.children.includes(button(p, 'Save configuration')));
-  h.assert(row && row.children.includes(button(p, 'Restore the previous configuration')), 'apply and restore in one mw-row');
+  const row = collect(p).find(n => n.attrs.class === 'mw-row' && n.children.includes(button(p, 'Save config')));
+  h.assert(row && row.children.includes(button(p, 'Restore previous config')), 'apply and restore in one mw-row');
   const top = p.children.filter(c => c && typeof c === 'object').map(c => c.tag + (c.attrs['aria-live'] ? ':live' : ''));
   h.assert(!top.includes('h2'), 'configuration widgets leave heading and notices to their page');
  });
  await check('restore', async () => {
   reloads = 0;
-  const p = await render(); const restore = button(p, 'Restore the previous configuration'); h.assert(restore, 'backup restore button');
+  const p = await render(); const restore = button(p, 'Restore previous config'); h.assert(restore, 'backup restore button');
   h.assert(texts(p).includes('Automatic updates will replace the restored configuration again.'), 'automatic update warning');
   calls = []; ui.autoConfirm = false; await restore.listeners.click(); h.assertEq(calls.length, 0, 'cancel restore');
   ui.autoConfirm = true; await restore.listeners.click(); h.assertEq(calls[0].join(','), 'job,restore-config', 'restore job'); h.assertEq(reloads, 1, 'reload after restore');
@@ -1282,7 +1309,7 @@ seq(async () => {
    h.assertEq(restoreNotices[0], msg, 'restore notice ' + action);
   }
   bridge.job = async (...args) => { calls.push(['job', ...args]); return { action: 'unchanged' }; };
-  h.assert(!button(await render(false), 'Restore the previous configuration'), 'no restore without backup');
+  h.assert(!button(await render(false), 'Restore previous config'), 'no restore without backup');
   const off = await render(true, false), note = collect(off).find(n => n.textContent === 'Automatic updates will replace the restored configuration again.');
   h.assert(note.hidden, 'automatic warning hidden when off');
   const auto = collect(off).find(n => n.attrs.id === 'mw-auto'); auto.checked = true; await auto.listeners.change();
@@ -1292,7 +1319,7 @@ seq(async () => {
   noticeCalls = 0;
   for (const running of [false, true]) {
    bridge.jobRunning = running; const p = await render();
-   for (const label of ['Save', 'Update now', 'Save configuration', 'Restore the previous configuration']) {
+   for (const label of ['Save', 'Update now', 'Save config', 'Restore previous config']) {
     const b = button(p, label); h.assert(b.attrs['data-mw-job'] != null, label + ' marked');
     h.assert(running ? b.attrs.disabled === true : b.attrs.disabled == null, label + ' running state');
    }
@@ -1395,7 +1422,7 @@ seq(async () => {
   api: { ...api, ...readStubs, busy: async (el, fn) => fn(), upload: async () => '/tmp/yaml', write: async () => ({}),
    job: async (...args) => { jobs.push(args); return { action: 'unchanged' }; }, notify() {}, reloadWithNotice() {} }
  }).module;
- const editorLabel = 'Show the configuration editor', effectiveShow = 'Show the configuration passed to Xray', effectiveHide = 'Hide the configuration passed to Xray';
+ const editorLabel = 'Show config editor', effectiveShow = 'Show running config', effectiveHide = 'Hide running config';
  const readCount = cmd => reads.calls.filter(c => c === cmd).length;
  const editorAreas = p => collect(p).filter(n => n.tag === 'textarea');
  await check('no yaml at load', async () => {
@@ -1418,13 +1445,13 @@ seq(async () => {
   await open.listeners.click(); await settle();
   h.assert(texts(box).includes('Cannot load the configuration: x'), 'error alert inside the toggle');
   h.assertEq(editorAreas(p).length, 0, 'no textarea after a failed load');
-  h.assert(!findButton(p, 'Save configuration'), 'no Save configuration after a failed load');
+  h.assert(!findButton(p, 'Save config'), 'no Save config after a failed load');
   await open.listeners.click();
   reads.responses['read-config'] = { content: 'proxies: []\n' };
   await open.listeners.click(); await settle();
   h.assertEq(readCount('read-config'), 2, 'reopening retries');
   h.assertEq(editorAreas(p).length, 1, 'editor after a successful retry');
-  h.assert(findButton(p, 'Save configuration'), 'Save configuration after a successful retry');
+  h.assert(findButton(p, 'Save config'), 'Save config after a successful retry');
   h.assert(!texts(box).includes('Cannot load the configuration: x'), 'error alert gone after the retry');
  });
  await check('update confirm only when edited', async () => {
@@ -1459,7 +1486,7 @@ seq(async () => {
    h.assertEq(opts.monospace, true, 'monospace');
    h.assertEq(opts.wrap, false, 'no wrap');
    h.assertEq(opts.rows, 24, '24 rows');
-   h.assert(texts(box).includes('Your configuration with router inbounds, DNS and service rules added, and the xraywrt key removed. Keys, passwords and IDs are hidden as ***.'), 'note text');
+   h.assert(texts(box).includes('Config passed to Xray, with router rules added. Secrets are masked with ***.'), 'note text');
    const stopped = collect(box).some(n => String(n.textContent).includes('XrayWRT is not running; this is what it would pass at start.'));
    h.assertEq(stopped, generated, 'not-running line only when generated');
    await show.listeners.click(); await show.listeners.click(); await settle();
@@ -1609,7 +1636,7 @@ seq(async () => {
   await t.render(lists, { provider: { block_client_ipv6: '1' } });
   const o = ipv6Flag(t);
   h.assertEq(o.cfgvalue('settings'), 'provider', 'provider applies initially');
-  h.assertEq(o.values[0][1], 'As provider: Enabled', 'provider value displayed');
+  h.assertEq(o.values[0][1], 'From subscription: Enabled', 'provider value displayed');
   h.assertEq(o.title, ipv6Title, 'dropdown keeps accessible title');
   o.write('settings', '0');
   h.assertEq(t.settings.provider_override.join(','), 'bypass_ntp,block_client_ipv6', 'own adds override');
@@ -1639,7 +1666,7 @@ seq(async () => {
   await t.render(lists, { provider: { core_log_level: 'debug' } });
   let o = t.tv.map.options.core_log_level;
   h.assertEq(o.cfgvalue('settings'), 'provider', 'log level follows provider');
-  h.assertEq(o.values[0][1], 'As provider: Debug', 'provider log level readable label');
+  h.assertEq(o.values[0][1], 'From subscription: Debug', 'provider log level readable label');
   h.assertEq(o.values.map(v => v[0]).join(','), 'provider,debug,info,warning,error,none', 'all own log levels');
   o.write('settings', 'none');
   h.assertEq(t.settings.core_log_level, 'none', 'own log level saved');
@@ -1888,7 +1915,7 @@ seq(async () => {
   await t.render(lists, { provider: { lists_interval: '6' } });
   o = t.tv.map.options.lists_interval;
   h.assertEq(o.cfgvalue('settings'), 'provider', 'provider interval is the first choice');
-  h.assertEq(o.vallist[0], 'As provider: 6 h', 'provider interval label');
+  h.assertEq(o.vallist[0], 'From subscription: 6 h', 'provider interval label');
   h.assert(!o.readonly, 'provider interval is changed here');
  });
  await check('update lists job', async () => {
@@ -1910,19 +1937,19 @@ seq(async () => {
   const n = E(tag, attrs, children); n.value = n.attrs.value || ''; n.checked = n.attrs.checked != null;
   return n;
  }
- const actions = ['Save', 'Update now', 'Save configuration', 'Restore the previous configuration'];
+ const actions = ['Save', 'Update now', 'Save config', 'Restore previous config'];
  for (const readOnly of [false, true]) {
   const sv = h.evaluateLuCIModule('rootfs/www/luci-static/resources/xraywrt/configuration.js', {
    E: DOM, ui, Blob, view: { extend: v => v }, api: { ...api, ...readStubs, readOnly: () => readOnly }
   }).module;
   const p = await mountSubscription(sv, { url: 'https://p.example/sub', config_backup: true }, { content: 'yaml' });
   // The raw configuration (with keys) is for the write role: read-only users get no editor.
-  h.assertEq(!!findButton(p, 'Show the configuration editor'), !readOnly, 'editor toggle shown=' + !readOnly);
-  if (!readOnly) await openToggle(p, 'Show the configuration editor');
+  h.assertEq(!!findButton(p, 'Show config editor'), !readOnly, 'editor toggle shown=' + !readOnly);
+  if (!readOnly) await openToggle(p, 'Show config editor');
   for (const label of actions) h.assertEq(!!findButton(p, label), !readOnly, label + ' shown=' + !readOnly);
   h.assertEq(collect(p).some(n => n.tag === 'textarea'), !readOnly, 'YAML visible only to the write role, read-only=' + readOnly);
   h.assertEq(reads.calls.includes('read-config'), !readOnly, 'read-only never reads the raw config');
-  h.assert(findButton(p, 'Show the configuration passed to Xray'), 'viewing stays available');
+  h.assert(findButton(p, 'Show running config'), 'viewing stays available');
  }
  console.log('ok - subscription read-only hides actions');
 }).catch(err => { console.error(err); process.exitCode = 1; });
@@ -2027,7 +2054,7 @@ seq(async () => {
    h.assert(catalog.includes('msgid "' + message + '"\nmsgstr "') && !catalog.includes('msgid "' + message + '"\nmsgstr ""'), 'Russian translation: ' + message);
  });
  await check('subscription row is unknown without a subscription', () => {
-  const row = item(render({ ...healthy, subscription_configured: false }), 'No subscription: your own configuration is used');
+  const row = item(render({ ...healthy, subscription_configured: false }), 'No subscription. Using your config.');
   h.assert(row && texts(row).includes('Unknown:') && !texts(row).includes('Problem:'), 'no subscription is not a failed check');
   h.assert(texts(item(render({ ...healthy, subscription_configured: true }), 'Subscription configured')).includes('OK:'), 'subscription present is OK');
  });
@@ -2106,10 +2133,10 @@ seq(async () => {
   h.assert(!texts(render(healthy, { ...resources, open_proxy_ports: [7890] })).some(t => t.includes('7890')), 'no open ports item');
  });
  await check('last configuration check', () => {
-  h.assert(texts(render(healthy, { ...resources, config_test: { valid: null, output: [] } })).includes('Not checked yet: Xray checks the configuration at start.'), 'unchecked');
-  h.assert(texts(render(healthy, { ...resources, config_test: { valid: true, output: [] } })).includes('Xray accepted the configuration.'), 'accepted');
+  h.assert(texts(render(healthy, { ...resources, config_test: { valid: null, output: [] } })).includes('Xray checks the config at startup.'), 'unchecked');
+  h.assert(texts(render(healthy, { ...resources, config_test: { valid: true, output: [] } })).includes('Xray accepted the config.'), 'accepted');
   const bad = render(healthy, { ...resources, config_test: { valid: false, output: ['Failed to start: x', 'line 2'] } });
-  h.assert(texts(bad).includes('Xray rejected the configuration:') && texts(bad).includes('Failed to start: x\nline 2'), 'run -test output shown');
+  h.assert(texts(bad).includes('Xray rejected the config:') && texts(bad).includes('Failed to start: x\nline 2'), 'run -test output shown');
  });
  await check('diagnostics read and partial failure', async () => {
   const calls = [];
@@ -2118,6 +2145,7 @@ seq(async () => {
   } }).module;
   const data = await dv.load(); const p = dv.render(data);
   h.assert(calls.some(c => c.length === 1 && c[0] === 'diagnostics-json'), 'diagnostics-json without args');
+  h.assert(calls.some(c => c[0] === 'profile-json' && c[1] === '--compact'), 'Help requests compact profile');
   h.assert(texts(p).includes('Service is running') && texts(p).includes('Details'), 'rest remains usable');
   h.assert(texts(p).some(t => t.includes('Cannot load diagnostics: Access denied. Log in to LuCI again, or ask for write access.')), 'partial failure cause uses errorText');
   h.assert(texts(p).includes('Reload the page to try again.'), 'partial failure retry hint');
@@ -2147,7 +2175,7 @@ seq(async () => {
 
   const coreMissing = item(pMultiple, 'Xray core is not installed');
   h.assert(coreMissing && texts(coreMissing).includes('Problem:'), 'negative label for core missing');
-  const configRowWithoutCore = item(pMultiple, 'Configuration not checked yet (it is checked at start)');
+  const configRowWithoutCore = item(pMultiple, 'Config will be checked at startup');
   h.assert(configRowWithoutCore && texts(configRowWithoutCore).includes('Unknown:'), 'config unknown without core');
 
   const stoppedRow = item(pStopped, 'XrayWRT is not running');
@@ -2165,7 +2193,7 @@ seq(async () => {
   const pCoreMissing = render({ ...healthy, state: 'stopped', running: false, core_installed: false });
   h.assert(texts(item(pCoreMissing, 'XrayWRT is not running')).includes('Install the Xray core first (Updates page).'), 'core missing hint');
   const pConfigBad = render({ ...healthy, state: 'failed', core_installed: true, config_valid: false });
-  h.assert(texts(item(pConfigBad, 'XrayWRT is not running')).includes('Fix the configuration first (see the item above), then press Start on Home.'), 'config invalid hint');
+  h.assert(texts(item(pConfigBad, 'XrayWRT is not running')).includes('Fix the config, then press Start on Home.'), 'config invalid hint');
  });
  await check('R40 subscription improvements', async () => {
   const windowListeners = {}, windowRemoved = {};
@@ -2326,31 +2354,31 @@ seq(async () => {
  h.assertEq(notes.at(-1), 'Subscription settings saved.', 'toggle save notice');
  reject = true; checkbox.checked = false; await checkbox.listeners.change();
  h.assertEq(checkbox.checked, true, 'failed toggle restored'); reject = false;
- await openToggle(p, 'Show the configuration editor');
+ await openToggle(p, 'Show config editor');
  h.assertEq(collect(p).find(n => n.tag === 'textarea').value, pretty, 'one-line JSON is pretty-printed on open');
  let dirty = false; guard({ preventDefault() { dirty = true; } }); h.assert(!dirty, 'pretty-printed text is clean');
  // Large integers and key order survive; saving unchanged text does nothing.
  const exact = '{"b":1,"a":12345678901234567890123,"outbounds":[]}';
  const q = await mountSubscription(v, { url: '' }, { content: exact });
- await openToggle(q, 'Show the configuration editor');
+ await openToggle(q, 'Show config editor');
  const area = collect(q).find(n => n.tag === 'textarea');
  h.assertEq(area.value, exact, 'large integer and key order kept');
  calls.length = 0; notes.length = 0;
- await findButton(q, 'Save configuration').listeners.click(); await settle();
+ await findButton(q, 'Save config').listeners.click(); await settle();
  h.assertEq(calls.length, 0, 'unchanged text is not saved'); h.assertEq(notes.at(-1), 'Configuration is unchanged.', 'unchanged notice');
  // Multi-line text is shown as stored; a CRLF config opened and saved untouched is unchanged.
  for (const stored of ['{\n"a":1}', '{\r\n  "a": 1\r\n}\r\n']) {
   const m = await mountSubscription(v, { url: '' }, { content: stored });
-  await openToggle(m, 'Show the configuration editor');
+  await openToggle(m, 'Show config editor');
   h.assertEq(collect(m).find(n => n.tag === 'textarea').value, stored.replace(/\r\n/g, '\n'), 'multi-line text shown as stored');
   const guardEvent = { preventDefault() { this.prevented = true; } }; guard(guardEvent);
   h.assert(!guardEvent.prevented, 'untouched multi-line text is clean');
   calls.length = 0; notes.length = 0;
-  await findButton(m, 'Save configuration').listeners.click(); await settle();
+  await findButton(m, 'Save config').listeners.click(); await settle();
   h.assertEq(calls.length, 0, 'untouched multi-line text is not saved'); h.assertEq(notes.at(-1), 'Configuration is unchanged.', 'untouched multi-line notice');
  }
  reads.responses['runtime-config'] = { content: raw };
- await openToggle(p, 'Show the configuration passed to Xray');
+ await openToggle(p, 'Show running config');
  h.assertEq(collect(p).filter(n => n.tag === 'textarea')[1].value, pretty, 'runtime pretty JSON');
  const blank = await mountSubscription(v, { url: '' });
  h.assertEq(collect(blank).find(n => n.attrs.id === 'mw-auto').attrs.disabled, true, 'toggle disabled without saved URL');
@@ -2369,7 +2397,7 @@ seq(async () => {
    configCheck: async path => { calls.push(['check', path]); return checkReply; }, job: async (...a) => { calls.push(a); return {}; } }
  }).module;
  const p = await mountSubscription(cv, { url: '' }, { content: '{"outbounds":[]}' });
- await openToggle(p, 'Show the configuration editor');
+ await openToggle(p, 'Show config editor');
  collect(p).find(n => n.tag === 'textarea').value = '{"outbounds":[{}]}';
  await findButton(p, 'Validate').listeners.click(); await settle();
  h.assertEq(JSON.stringify(calls), '[["upload","xraywrt-config","{\\"outbounds\\":[{}]}"],["check","/tmp/xraywrt-config.v"]]', 'Validate checks the edited text without installing');
@@ -2381,7 +2409,7 @@ seq(async () => {
  h.assertEq(reads.calls.filter(c => c === 'runtime-config').length, 0, 'runtime view stays lazy');
  const ro = h.evaluateLuCIModule('rootfs/www/luci-static/resources/xraywrt/configuration.js', { E: DOM, ui, Blob, view: { extend: v => v }, api: { ...api, ...readStubs, readOnly: () => true } }).module;
  const rp = await mountSubscription(ro, { url: '' }, { content: '{}' });
- h.assert(!findButton(rp, 'Show the configuration editor') && !findButton(rp, 'Validate'), 'read-only user has no editor and cannot run config-check');
+ h.assert(!findButton(rp, 'Show config editor') && !findButton(rp, 'Validate'), 'read-only user has no editor and cannot run config-check');
  console.log('ok - config Validate');
 }).catch(err => { console.error(err); process.exitCode = 1; });
 
@@ -2493,6 +2521,32 @@ seq(async () => {
  h.assertEq(JSON.stringify(calls), '[["geodata-update","--force"]]', 'forced geodata update');
  const geoFile = collect(p).find(n => n.attrs.id === 'mw-geo-file'), geoName = collect(p).find(n => n.attrs.id === 'mw-geo-name');
  geoFile.files = [{ name: 'ext.dat', size: 10 }]; geoName.value = '';
+ // Closing a confirmation without resolving it must never hold the job lock.
+ const oldConfirm = bridge.confirm, oldBusy = bridge.busy; let busyCalls = 0;
+ bridge.busy = async (button, fn) => { busyCalls++; return oldBusy(button, fn); };
+ bridge.confirm = () => new Promise(() => {});
+ findButton(p, 'Upload').listeners.click();
+ h.assertEq(busyCalls, 0, 'upload confirmation does not acquire job lock');
+ bridge.confirm = oldConfirm; bridge.busy = oldBusy;
+ // A real busy operation started while the modal is open must block upload.
+ let resumeConfirmation, finishOther, racedUploads = 0; const lockedButtons = [];
+ const real = origEvaluate('rootfs/www/luci-static/resources/xraywrt/api.js', {
+  E: DOM, ui: coreUi, fs: {}, document: { querySelectorAll: () => lockedButtons }
+ }).module;
+ Object.assign(real, { confirm: () => new Promise(resolve => { resumeConfirmation = resolve; }),
+  upload: async () => { racedUploads++; return '/tmp/unused'; }, readOnly: () => false });
+ const realView = origEvaluate('rootfs/www/luci-static/resources/view/xraywrt/updates.js', { E: DOM, ui: coreUi, uci, view: { extend: v => v }, api: real }).module;
+ const racePage = realView.render([st, {}]), raceUpload = findButton(racePage, 'Upload');
+ collect(racePage).find(n => n.attrs.id === 'mw-geo-file').files = [{ name: 'ext.dat', size: 10 }];
+ const other = E('button', { 'data-mw-job': '' }); lockedButtons.push(raceUpload, other);
+ const pendingUpload = raceUpload.listeners.click();
+ const pendingOther = real.busy(other, () => new Promise(resolve => { finishOther = resolve; }));
+ h.assert(raceUpload.disabled, 'other action locks upload while confirmation is open');
+ resumeConfirmation(true); await pendingUpload;
+ h.assertEq(racedUploads, 0, 'confirmation cannot start upload during another action');
+ h.assert(raceUpload.disabled, 'confirmation does not start upload or release the other action');
+ finishOther(); await pendingOther;
+ h.assert(!raceUpload.disabled, 'upload unlocks after the other action');
  calls.length = 0; uploads = 0; await findButton(p, 'Upload').listeners.click(); await settle();
  h.assertEq(JSON.stringify(calls), '[["upload","xraywrt-geodata","ext.dat"],["geodata-update","--file","/tmp/xraywrt-geodata.1","--name","ext.dat"]]', 'geodata upload with the file name');
  h.assert(texts(E('div', {}, ui.modalCalls.at(-1).children)).some(t => t.includes('cannot be checked now')), 'unverified warning before geodata upload');
@@ -2552,14 +2606,14 @@ seq(async () => {
  const advancedPage = await advanced.render([{}, st, {}]);
  h.assert(!texts(advancedPage).includes('By link') && !texts(advancedPage).includes('Add my own rule database'), 'geodata links are not on Advanced');
  // Advanced: the editor card has one heading with its note, below the settings form.
- const maint = collect(advancedPage).find(n => n.attrs.class === 'cbi-section' && collect(n).some(c => c.tag === 'h3' && texts(c).includes('Xray configuration')));
- h.assert(maint, 'Advanced has an Xray configuration card');
+ const maint = collect(advancedPage).find(n => n.attrs.class === 'cbi-section' && collect(n).some(c => c.tag === 'h3' && texts(c).includes('Xray config')));
+ h.assert(maint, 'Advanced has an Xray config card');
  h.assert(!collect(advancedPage).some(n => /^h[1-6]$/.test(n.tag) && texts(n).includes('Maintenance')), 'no Maintenance heading');
  h.assertEq(collect(advancedPage).filter(n => n.tag === 'h3').length, 1, 'one heading below the settings form');
  const headingAt = collect(maint).findIndex(n => n.tag === 'h3');
- h.assertEq(texts(collect(maint)[headingAt + 1]).join(''), 'Use "Save configuration" to apply editor changes immediately. "Save & Apply" does not save them.', 'the note sits right under the heading');
+ h.assertEq(texts(collect(maint)[headingAt + 1]).join(''), 'Use “Save config” below to apply editor changes.', 'the note sits right under the heading');
  h.assert(collect(advancedPage).findIndex(n => n.tag === 'form') < collect(advancedPage).indexOf(maint), 'the editor card sits below the settings form');
- for (const label of ['Show the configuration editor']) {
+ for (const label of ['Show config editor']) {
   const opener = findButton(maint, label);
   h.assert(opener && toggleOf(maint, opener).children[1].hidden === true, label + ': collapsed');
  }
@@ -2570,7 +2624,7 @@ seq(async () => {
   && nodesOf.findIndex(n => n.attrs.class === 'cbi-page-actions') < nodesOf.indexOf(maint), 'footer is built under the settings form, above the editor card');
  h.assertEq(advanced.addFooter().children.length, 0, 'the view own addFooter adds nothing');
  // A card that holds only a button has no heading row and no top margin of its own: Help's runtime card.
- const helpCard = collect(diag.render([base, {}, {}])).find(n => /\bcbi-section\b/.test(n.attrs.class || '') && findButton(n, 'Show the configuration passed to Xray'));
+ const helpCard = collect(diag.render([base, {}, {}])).find(n => /\bcbi-section\b/.test(n.attrs.class || '') && findButton(n, 'Show running config'));
  h.assert(helpCard && !collect(helpCard).some(n => /^h[1-6]$/.test(n.tag)) && /\bmw-page\b/.test(helpCard.attrs.class), 'button-only card: no heading, toggle directly in the page spacing');
  // Subscription: no LuCI form and footer, only its own buttons.
  const subView = h.evaluateLuCIModule('rootfs/www/luci-static/resources/view/xraywrt/subscription.js', { E: DOM, ui: coreUi, view: { extend: v => v }, api: bridge }).module;
@@ -2734,7 +2788,7 @@ seq(async () => {
  h.assert(!/msgid "[^"]*\bOverview\b/.test(h.readSource('po/ru/xraywrt.po')), 'catalog calls Home "Overview"');
  const helpNodes = collect(diag.render([base, {}, {}]));
  const helpAt = label => helpNodes.indexOf(helpNodes.find(n => n.tag === 'button' && texts(n).includes(label)));
- h.assert(helpAt('Check again') >= 0 && helpAt('Check again') < helpAt('Show the configuration passed to Xray'), 'Help: the configuration passed to Xray sits below the checklist');
+ h.assert(helpAt('Check again') >= 0 && helpAt('Check again') < helpAt('Show running config'), 'Help: the configuration passed to Xray sits below the checklist');
  console.log('ok - Home order and naming');
 }).catch(err => { console.error(err); process.exitCode = 1; });
 
@@ -2818,8 +2872,8 @@ seq(async () => {
  }).module;
  await advanced.render([{ mode: 'proxy-first', provider: { disable_quic: '0' } }, {}, {}]);
  const overridden = advanced.map.options.disable_quic;
- h.assert(overridden.description.includes('Changed by you.'), 'Advanced marks overridden fields');
- await findButton(overridden.renderWidget('settings'), 'Return to provider settings').click();
+ h.assert(overridden.description.includes('Your override.'), 'Advanced marks overridden fields');
+ await findButton(overridden.renderWidget('settings'), 'Use subscription setting').click();
  h.assert(!settings.provider_override, 'Advanced reset removes the last override');
  bridge.readOnly = () => false;
  h.assert(h.readSource('rootfs/www/luci-static/resources/view/xraywrt/traffic.js').includes('api.LIST_TITLES'), 'one list title table');

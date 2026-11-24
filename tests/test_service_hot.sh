@@ -146,7 +146,7 @@ case "$scenario" in
      remove_only) [ "$(tr '\n' ' ' <"$dir/events")" = 'test rmo adrules bo policy ' ] ;;
      *)
     [ "$(jq -c . "$dir/removed.json")" = '{"outbounds":[{"tag":"node-b"},{"tag":"removed"}]}' ]
-    grep -q '^api rmo --server=127.0.0.1:10085 --timeout=30 ' "$dir/api"
+    grep -q '^api rmo --server=unix:/var/run/xraywrt/api.sock --timeout=30 ' "$dir/api"
     [ "$(jq -r '[.outbounds[].tag] | join(" ")' "$dir/added.json")" = 'node-b added' ]
     [ "$(grep -E '^(test|rmo|ado|adrules|bo)$' "$dir/events" | tr '\n' ' ')" = 'test rmo ado adrules bo ' ]
      ;;

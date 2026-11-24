@@ -4,6 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/testlib.sh"
 xray_test_bin 'live geodata probe' || exit 0
 tmpdir="$(make_temp_dir)"
+XRAY_API_SOCKET="$tmpdir/api.sock"
 pid='' http='' rc=0
 trap 'rc=$?; [ "$rc" = 0 ] || cat "$tmpdir/core.log"; kill ${pid:-} ${http:-} 2>/dev/null || :; rm -rf "$tmpdir"' EXIT
 export XRAY_LOCATION_ASSET="$tmpdir"
@@ -20,7 +21,7 @@ NODE
 }
 node -e 'require("http").createServer((q,s)=>{s.writeHead(204);s.end()}).listen(18080,"127.0.0.1")' &
 http=$!
-jq '.inbounds += [{tag:"probe",protocol:"socks",listen:"127.0.0.1",port:18081,settings:{auth:"noauth",udp:false}}] | .outbounds = [{tag:"direct",protocol:"freedom",settings:{domainStrategy:"UseIP"}},{tag:"block",protocol:"blackhole"}] | .routing.balancers = [] | del(.observatory) | .dns = {hosts:{"probe.test":"127.0.0.1","other.test":"127.0.0.1"},servers:["localhost"]}' "$ROOT_DIR/tests/fixtures/xray-api/config.json" >"$tmpdir/base.json"
+jq --arg listen "$XRAY_API_SOCKET,0600" '.api.listen = $listen | .inbounds += [{tag:"probe",protocol:"socks",listen:"127.0.0.1",port:18081,settings:{auth:"noauth",udp:false}}] | .outbounds = [{tag:"direct",protocol:"freedom",settings:{domainStrategy:"UseIP"}},{tag:"block",protocol:"blackhole"}] | .routing.balancers = [] | del(.observatory) | .dns = {hosts:{"probe.test":"127.0.0.1","other.test":"127.0.0.1"},servers:["localhost"]}' "$ROOT_DIR/tests/fixtures/xray-api/config.json" >"$tmpdir/base.json"
 status() {
  node - "$1" <<'NODE'
 const net = require('net'), host = process.argv[2];
@@ -40,7 +41,7 @@ for ref in geosite:TEST geoip:TEST ext:custom.dat:TEST; do
  write_data initial
  "$XRAY_TEST_BIN" run -c "$tmpdir/base.json" >"$tmpdir/core.log" 2>&1 & pid=$!
  for _ in {1..50}; do
-  "$XRAY_TEST_BIN" api adrules --server=127.0.0.1:10085 "$tmpdir/base.json" >/dev/null 2>&1 && break
+  "$XRAY_TEST_BIN" api adrules --server="unix:$XRAY_API_SOCKET" "$tmpdir/base.json" >/dev/null 2>&1 && break
   sleep .1
  done
  field=domain target=probe.test
@@ -48,10 +49,10 @@ for ref in geosite:TEST geoip:TEST ext:custom.dat:TEST; do
  jq --arg ref "$ref" --arg field "$field" '.routing.rules += [{($field):[$ref],outboundTag:"block"}]' "$tmpdir/base.json" >"$tmpdir/rules.json"
  assert_eq 204 "$(status "$target")" "$ref unused at start"
  "$XRAY_TEST_BIN" run -test -c "$tmpdir/rules.json" >"$tmpdir/test.log" 2>&1
- "$XRAY_TEST_BIN" api adrules --server=127.0.0.1:10085 "$tmpdir/rules.json"
+ "$XRAY_TEST_BIN" api adrules --server="unix:$XRAY_API_SOCKET" "$tmpdir/rules.json"
  assert_eq 000 "$(status "$target")" "$ref newly referenced file/category loaded by adrules"
  write_data changed
- "$XRAY_TEST_BIN" api adrules --server=127.0.0.1:10085 "$tmpdir/rules.json"
+ "$XRAY_TEST_BIN" api adrules --server="unix:$XRAY_API_SOCKET" "$tmpdir/rules.json"
  after="$(status "$target")"
  assert_eq 000 "$after" "$ref running core retains cached bytes"
  printf 'probe %s changed same-name file: HTTP %s\n' "$ref" "$after"
@@ -67,12 +68,13 @@ done
 "$XRAY_TEST_BIN" run -c "$tmpdir/base.json" >"$tmpdir/core.log" 2>&1 & pid=$!
 sleep .3
 assert_eq 204 "$(status probe.test)" 'default direct initially'
-"$XRAY_TEST_BIN" api rmo --server=127.0.0.1:10085 direct
+"$XRAY_TEST_BIN" api rmo --server="unix:$XRAY_API_SOCKET" direct
 jq '{outbounds:[.outbounds[0]]}' "$tmpdir/base.json" >"$tmpdir/add.json"
-"$XRAY_TEST_BIN" api ado --server=127.0.0.1:10085 "$tmpdir/add.json"
+"$XRAY_TEST_BIN" api ado --server="unix:$XRAY_API_SOCKET" "$tmpdir/add.json"
 printf 'probe remove/add default outbound: HTTP %s\n' "$(status probe.test)"
 load_modules constants.sh helpers.sh validate.sh xray-api.sh
-XRAY_BIN="$XRAY_TEST_BIN" XRAY_SHARE_DIR="$tmpdir"
+XRAY_API_SOCKET="$tmpdir/api.sock"
+XRAY_BIN="$XRAY_TEST_BIN" XRAY_SHARE_DIR="$tmpdir" XRAY_API_SOCKET="$tmpdir/api.sock"
 jq '.outbounds[0] = {tag:"direct",protocol:"blackhole"}' "$tmpdir/base.json" >"$tmpdir/default.json"
 xray_api_apply "$tmpdir/base.json" "$tmpdir/default.json"
 assert_eq 000 "$(status probe.test)" 'changed default uses replacement handler, not its old pointer'
@@ -80,10 +82,10 @@ xray_api_apply "$tmpdir/default.json" "$tmpdir/base.json"
 assert_eq 204 "$(status probe.test)" 'restored default uses replacement freedom handler'
 echo 'probe changed default handler: HTTP 000 then 204'
 jq '.routing.balancers = [{tag:"main",selector:["direct"],strategy:{type:"random"}}]' "$tmpdir/base.json" >"$tmpdir/balancer.json"
-"$XRAY_TEST_BIN" api adrules --server=127.0.0.1:10085 "$tmpdir/balancer.json"
-"$XRAY_TEST_BIN" api bi --server=127.0.0.1:10085 -json main
-"$XRAY_TEST_BIN" api adrules --server=127.0.0.1:10085 "$tmpdir/base.json"
-if "$XRAY_TEST_BIN" api bi --server=127.0.0.1:10085 -json main; then
+"$XRAY_TEST_BIN" api adrules --server="unix:$XRAY_API_SOCKET" "$tmpdir/balancer.json"
+"$XRAY_TEST_BIN" api bi --server="unix:$XRAY_API_SOCKET" -json main
+"$XRAY_TEST_BIN" api adrules --server="unix:$XRAY_API_SOCKET" "$tmpdir/base.json"
+if "$XRAY_TEST_BIN" api bi --server="unix:$XRAY_API_SOCKET" -json main; then
  fail 'adrules left a removed balancer present'
 else
  echo 'probe removed balancer: absent'

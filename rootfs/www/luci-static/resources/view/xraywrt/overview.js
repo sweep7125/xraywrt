@@ -122,14 +122,7 @@ function firstRunCard() {
 	const connect = E('button', { 'data-mw-job': '', disabled: api.jobRunning || null, class: 'cbi-button cbi-button-action important' }, text(_('Connect')));
 
 	connect.addEventListener('click', () => api.busy(connect, async () => {
-		const value = url.value.trim();
-		if (!/^https?:\/\//i.test(value))
-			throw new Error(_('Enter the subscription link that starts with https://'));
-		// The link is saved only after a successful download.
-		const res = await api.job('connect', value);
-		// Give the service a moment to start; stay inside busy so the buttons stay disabled until the reload.
-		await new Promise(resolve => window.setTimeout(resolve, 1500));
-		api.reloadResult(res, _('Subscription connected. XrayWRT is starting.'));
+		await api.connect(url.value.trim());
 	}));
 
 	return E('div', { class: 'cbi-section' }, [

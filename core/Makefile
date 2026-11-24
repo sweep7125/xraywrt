@@ -12,7 +12,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=xraywrt-core
 PKG_VERSION:=$(CORE_VERSION)
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=MPL-2.0
 PKG_MAINTAINER:=ristavor <90447432+ristavor@users.noreply.github.com>
 CORE_ARCH ?= aarch64_generic

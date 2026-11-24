@@ -125,7 +125,11 @@ apply-lists)
 update-lists) lists_refresh ;;
 auto-update)
 	settings_load || exit 1
-	subscription_due || { [ "$LISTS_INTERVAL" -gt 0 ] && [ -n "$(lists_urls)" ]; } || exit 0
+	if ! subscription_due; then
+		[ "$LISTS_INTERVAL" -gt 0 ] || exit 0
+		urls="$(lists_urls)" || exit 1
+		[ -n "$urls" ] || exit 0
+	fi
 	job_start auto-update >/dev/null
 	;;
 net-refresh) net_refresh_coalesced ;;
@@ -147,7 +151,10 @@ diagnostics-json)
 	diagnostics_json
 	;;
 status-json) status_json ;;
-profile-json) profile_json ;;
+profile-json)
+	[ $# -eq 0 ] || [ "$*" = --compact ] || usage
+	profile_json "$@"
+	;;
 service-state-json) service_state_json ;;
 logs-json) logs_json "${1:-200}" ;;
 report-logs)

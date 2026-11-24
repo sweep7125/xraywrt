@@ -78,7 +78,7 @@ return view.extend({
 				mode.value('direct-first', api.modeLabel('direct-first'));
 				mode.default = this.profile.mode;
 				return mode;
-			}, own ? _('As in the configuration: %s').format(api.modeLabel(own)) : _('As in the configuration'));
+			}, own ? _('From subscription: %s').format(api.modeLabel(own)) : _('From subscription'));
 		}
 
 		this.titles = api.LIST_TITLES();
@@ -88,7 +88,7 @@ return view.extend({
 			this.devicesOption(s, 'src', _('Use a MAC address: it covers IPv4 and IPv6.'), leases);
 		}
 		else {
-			// "As in the configuration" is the mode the configuration gives, or proxy-first when it says nothing.
+			// "From subscription" is the mode the configuration gives, or proxy-first when it says nothing.
 			const configMode = this.profile.mode_source === 'user' ? this.profile.provider?.mode : this.profile.mode;
 			for (const [ mode, kind ] of [ [ 'direct-first', 'src' ] ]) {
 				o = this.devicesOption(s, kind, _('Use a MAC address: it covers IPv4 and IPv6.'), leases);
@@ -158,21 +158,21 @@ return view.extend({
 				...(targets.length && targets.length <= TARGETS_SHOWN ? [ tags ] : []),
 				...(targets.length > TARGETS_SHOWN ? [ api.toggle(_('Show the targets'), _('Hide the targets'), tags) ] : []),
 				...(reserved.length ? [ E('p', text(_('The tags %s of the configuration cannot be used here: "direct" means straight to the internet and "core" means that the rules of the subscription decide.').format(reserved.join(', ')))) ] : []),
-				...(!proxyFirst ? [ E('p', text(_('A site rule with ports or protocol does not capture traffic on its own. Use an address or subnet for exact capture.'))) ] : []),
+				...(!proxyFirst ? [ E('p', text(_('Site rules with ports or a protocol apply to traffic Xray already sees. Use an IP or subnet to capture it.'))) ] : []),
 				// Direct sites are recognized by the core in this mode only with sniffing.
 				...(proxyFirst && !recognizesSites ? [ E('p', text(_('Site recognition is not enabled in the configuration, so unqualified direct site rules are not used. Qualified site rules also need recognized traffic.'))) ] : [])
 			];
 			const format = E('div', { class: 'cbi-value-description' }, [
 				E('p', text(_('One rule per line, for example:'))),
 				E('ul', [
-					[ 'google.com direct', _('a site and its subdomains, straight to the internet') ],
-					[ 'geosite:youtube core', _('a category from geosite.dat, the rules of the subscription decide') ],
-					[ 'full:www.example.com my-server', _('only this exact name, through a server or balancer of your configuration') ],
-					[ '1.2.3.0/24 direct', _('an address or subnet') ],
-					[ 'https://example.com/list.txt direct', _('a link to a list of addresses and subnets') ]
+					[ 'google.com direct', _('Site and subdomains, direct') ],
+					[ 'geosite:youtube core', _('Site category, follow the subscription') ],
+					[ 'full:www.example.com my-server', _('Exact name, via a server or balancer') ],
+					[ '1.2.3.0/24 direct', _('IP address or subnet') ],
+					[ 'https://example.com/list.txt direct', _('URL of an IP list') ]
 				].map(([ example, meaning ]) => E('li', [ E('code', text(example)), ' — ', meaning ]))),
-				E('p', text(_('A site core rule does not stop later routes with overlapping different site matchers. Avoid that overlap when the subscription should decide.'))),
-				E('p', text(_('Append ;ports or ;ports;tcp/udp to a site, address or list link; use ;;udp for all UDP ports. Site selectors cannot use core. Semicolons in regexp: remain part of the expression, not selectors.'))),
+				E('p', text(_('Overlapping site rules can still apply after core. Avoid overlaps to let the subscription decide.'))),
+				E('p', text(_('Add ;443;tcp for TCP port 443 or ;;udp for any UDP port. For sites with a port or protocol, use direct or a named target. In regexp:, semicolons are part of the pattern.'))),
 				E('p', text(_('Other site forms: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Comments start with #. Saving is refused until every line is valid.')))
 			]);
 			const sources = this.profile.provider_sources;

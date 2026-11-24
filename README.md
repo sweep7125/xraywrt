@@ -17,6 +17,9 @@ YAML subscriptions and share links such as `vless://` are not supported.
 - Remove conflicting proxy and DNS packages before installation; the installer
   reports conflicts. Run only one proxy stack at a time.
 
+**NetBird on the router** can disrupt IPv4 connections from your devices
+through Xray in both traffic modes. See [NetBird compatibility](docs/user-guide.md#netbird).
+
 ## Install
 
 On the router, as root:
@@ -34,7 +37,7 @@ remains installed with the service disabled. For Russian LuCI, also install
 
 1. Open **LuCI → Services → XrayWRT → Subscription**, enter a JSON subscription
    URL and press **Connect**. Or enter a manual configuration under
-   **Advanced → Xray configuration**.
+   **Advanced → Xray config**.
 2. Check **Home** and use **What goes via VPN** to set traffic mode and rules.
 3. Use **Home** to start or stop the service and select a provider server when
    a selector is available. See the [user guide](docs/user-guide.md).
@@ -42,6 +45,8 @@ remains installed with the service disabled. For Russian LuCI, also install
 ## Updates
 
 Run the installer again to update app packages and an installed core package.
+On existing installations, it updates a managed core package before the app.
+For manual upgrades from the TCP API, install core `0.26.5-r2` or newer first.
 The core is not updated automatically: use **Updates → Update the core** or
 `xraywrt core-update`. Subscription and remote-list updates are separate.
 Check available flash and RAM before updating. A stopped service stays stopped.

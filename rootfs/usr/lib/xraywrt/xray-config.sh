@@ -6,9 +6,10 @@
 
 # Router parameters for the generator, from settings_load (spec 6.1).
 xray_params_json() {
-	local rules=""
+	local rules="" remote=""
 
 	[ ! -f "$RULES_FILE" ] || rules="$RULES_FILE"
+	remote="$(lists_rules_remote_json)" || return 1
 	# shellcheck disable=SC2086 # UCI list: one value per word
 	xraywrt-json build object \
 		--arg mode "${UCI_MODE:-proxy-first}" \
@@ -24,7 +25,8 @@ xray_params_json() {
 		--argjson log_level_override "$([ "${LOG_LEVEL_OVERRIDE:-0}" = 1 ] && echo true || echo false)" \
 		--argjson mark "$XRAY_ROUTING_MARK" \
 		--argjson ipv6 "$(route_ipv6_enabled && echo true || echo false)" \
-		--argjson ports "{\"tproxy\":$XRAY_TPROXY_PORT,\"direct\":$XRAY_DIRECT_TPROXY_PORT,\"dns\":$XRAY_DNS_PORT,\"api\":$XRAY_API_PORT}" \
+		--arg api_listen "$XRAY_API_SOCKET,0600" \
+		--argjson ports "{\"tproxy\":$XRAY_TPROXY_PORT,\"direct\":$XRAY_DIRECT_TPROXY_PORT,\"dns\":$XRAY_DNS_PORT}" \
 		--arg fakeip_range "$FAKEIP_RANGE" \
 		--argjson local_nets "$(printf '%s\n' $LOCAL_NETS_V4 $LOCAL_NETS_V6 | xraywrt-json lines)" \
 		--argjson wan_dns "$(dns_wan_servers | xraywrt-json lines)" \
@@ -33,7 +35,7 @@ xray_params_json() {
 		--arg dns_raw_lost "${DNS_RAW_LOST:-}" \
 		--argjson dns_forward_other_types "${DNS_FORWARD_OTHER_TYPES:-0}" \
 		--arg rules_file "$rules" \
-		--argjson rules_remote "$(lists_rules_remote_json)"
+		--argjson rules_remote "$remote"
 }
 
 # xray_config_generate <src> <dst> [key]
@@ -41,22 +43,23 @@ xray_params_json() {
 # source, domain lists and the generator itself.
 # Returns 2 when the config itself is rejected ("config: ..."), 1 otherwise.
 xray_config_generate() {
-	local src="$1" dst="$2" mode="${3:-}" tmp="" params="" lib="" line="" key=""
+	local src="$1" dst="$2" mode="${3:-}" tmp="" params="" lib="" line="" key="" source_hash="" lib_hash="" rules_hash="" remote_hashes=""
 
 	[ -r "$src" ] || {
 		err_code config_missing "Xray config not found: %s" "$src"
 		return 1
 	}
 	lib="$(xraywrt_lib_dir)"
-	params="$(xray_params_json)" || return 1
+	params="${4:-}"
+	[ -n "$params" ] || params="$(xray_params_json)" || return 1
 	if [ "$mode" = key ]; then
-		key="$({
-			printf '%s\n' "$params"
-			sha256sum <"$src"
-			sha256sum <"$lib/xray-config.uc"
-			[ ! -f "$RULES_FILE" ] || sha256sum <"$RULES_FILE"
-			lists_rules_remote_hashes
-		} | sha256sum)" || return 1
+		source_hash="$(sha256sum <"$src")" || return 1
+		lib_hash="$(sha256sum <"$lib/xray-config.uc")" || return 1
+		if [ -f "$RULES_FILE" ]; then
+			rules_hash="$(sha256sum <"$RULES_FILE")" || return 1
+		fi
+		remote_hashes="$(lists_rules_remote_hashes)" || return 1
+		key="$(printf '%s\n' "$params" "$source_hash" "$lib_hash" "$rules_hash" "$remote_hashes" | sha256sum)" || return 1
 		printf '%s\n' "${key%% *}"
 		return 0
 	fi
@@ -99,7 +102,20 @@ xray_config_generate() {
 }
 
 xray_config_key() {
-	xray_config_generate "$1" "" key
+	xray_config_generate "$1" "" key "${2:-}"
+}
+
+# Populate the caller's local snapshot; generation retries capture if it fails.
+xray_config_prepare() {
+	if XRAY_RULE_REMOTE="$(lists_rules_remote_pairs)"; then
+		if params="$(xray_params_json)"; then
+			inputs="$(xray_config_key "$1" "$params" 2>/dev/null)" || inputs=""
+		else
+			params=""
+		fi
+	else
+		unset XRAY_RULE_REMOTE
+	fi
 }
 
 # Accepted runtimes only, under the caller's lock. Keep a UCI snapshot until publication succeeds.

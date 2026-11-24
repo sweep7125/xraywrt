@@ -112,14 +112,10 @@ job_reconcile() {
 	job_slot_release "$id"
 }
 
-job_history() {
-	xraywrt-json history sort "$JOBS_DIR"/*.json 2>/dev/null
-}
-
 job_prune() {
 	local id="" ids=""
 
-	ids="$(job_history | xraywrt-json history prune)" || return 1
+	ids="$(xraywrt-json history sort-prune "$JOBS_DIR"/*.json 2>/dev/null)" || return 1
 	for id in $ids; do
 		job_id_valid "$id" || continue
 		rm -f "$JOBS_DIR/$id.json" "$JOBS_DIR/$id.pid" "$JOBS_DIR/$id.out" "$JOBS_DIR/$id.err"
@@ -274,7 +270,7 @@ job_status_locked() {
 	local id="${1:-}"
 	if [ -z "$id" ]; then
 		id="$(readlink "$JOBS_DIR/active" 2>/dev/null)"
-		[ -n "$id" ] || id="$(job_history | xraywrt-json history last)"
+		[ -n "$id" ] || id="$(xraywrt-json history sort-last "$JOBS_DIR"/*.json 2>/dev/null)"
 	fi
 	[ -n "$id" ] || { printf '{"state":"none"}\n'; return 0; }
 	job_id_valid "$id" && [ -f "$JOBS_DIR/$id.json" ] || { err "Job not found: $id"; return 1; }

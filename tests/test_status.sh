@@ -131,6 +131,48 @@ assert_eq null "$(status_json | jq .config_valid)" "new config invalidates resul
 printf 'profile-schema 1\nfake-enabled 0\nmode proxy-first\ndns redir-host\nset disable_quic 0\nhas proxy-ips\nproxy-ip 1.2.3.4\n' >"$PROFILE_FILE"
 fake_uci_set xraywrt.settings.provider_override disable_quic
 profile_json | jq -e '.provider.disable_quic == "0" and .overrides == 1 and .targets == [] and .reserved == [] and .provider_lists == true' >/dev/null || fail "profile-json contract"
+(
+ settings_load() { POLICY_MODE=proxy-first; DNS_RAW_LOST=''; DNS_RAW_VIA=''; SUBSCRIPTION_URL='https://secret.example/key'; PROFILE_NAME=''; }
+ settings_provider_entries() { printf 'disable_quic 0\n'; }
+ settings_uci_get() { printf '0\n'; }
+ status_netbird_present() { return 0; }
+ provider_list_preview() { fail 'compact profile must not build provider previews'; }
+ XRAY_CONFIG_BACKUP="$tmpdir/compact-backup"
+ touch "$XRAY_CONFIG_BACKUP"
+ compact="$(profile_json --compact)"
+ jq -e '.mode == "proxy-first" and .provider.disable_quic == "0" and .netbird == true and .subscription == {configured:true,config_backup:true,auto_update:false} and (has("provider_sources") | not)' <<<"$compact" >/dev/null || fail "compact profile contract: $compact"
+ [[ "$compact" != *secret.example* ]] || fail 'compact profile exposes subscription URL'
+ rm "$XRAY_CONFIG_BACKUP"
+)
+pass 'compact profile omits previews and credentials'
+(
+ set_active_subscription 'https://secret.example/token'
+ fake_uci_set xraywrt.settings.netbird_mark invalid
+ fake_uci_set xraywrt.settings.netbird_interface ../..
+ fake_uci_set xraywrt.settings.subscription_auto_update 0
+ XRAY_CONFIG_BACKUP="$tmpdir/compact-invalid-backup"; touch "$XRAY_CONFIG_BACKUP"
+ status_netbird_present() { [ "$NETBIRD_INTERFACE" = "$NETBIRD_DEFAULT_IFACE" ]; }
+ compact="$(profile_json --compact 2>"$tmpdir/compact-invalid.err")" || fail 'compact profile survives invalid settings'
+ jq -e '.netbird == true and .subscription == {configured:true,config_backup:true,auto_update:false} and (has("mode") | not) and (has("provider") | not)' <<<"$compact" >/dev/null || fail "partial compact profile: $compact"
+ [[ "$compact" != *secret.example* && ! -s "$tmpdir/compact-invalid.err" ]] || fail 'compact profile leaked a secret or validation error'
+ fake_uci_set xraywrt.settings.netbird_mark "$NETBIRD_DEFAULT_MARK"
+ fake_uci_set xraywrt.settings.netbird_interface "$NETBIRD_DEFAULT_IFACE"
+ set_active_subscription 'bad-secret-url'
+ if profile_json >"$tmpdir/invalid-full.out" 2>"$tmpdir/invalid-full.err"; then fail 'full profile rejects malformed URL'; fi
+ assert_file_contains "$tmpdir/invalid-full.err" 'Invalid subscription_url' 'full profile reaches URL validation'
+ compact="$(profile_json --compact 2>"$tmpdir/compact-invalid-url.err")" || fail 'compact profile survives malformed subscription'
+ jq -e '.subscription.configured == true' <<<"$compact" >/dev/null || fail 'configured flag retained for malformed URL'
+ [[ "$compact" != *bad-secret-url* && ! -s "$tmpdir/compact-invalid-url.err" ]] || fail 'compact profile leaked malformed URL'
+ fake_uci_reset
+)
+pass 'compact profile keeps independent flags on invalid settings without leaking values'
+(
+ have_command() { return 1; }
+ for NETBIRD_INTERFACE in . ..; do
+  assert_false 'dot paths never imply NetBird present' status_netbird_present
+ done
+)
+pass 'NetBird presence rejects dot path components'
 printf 'mode-source auto\nsniff tls\ndirect-domains 2\n' >>"$PROFILE_FILE"
 profile_json | jq -e '.mode_source == "auto" and .sniff == "tls" and .direct_domains == 2' >/dev/null || fail 'profile mode source and direct domains'
 status_json | jq -e '.sniff == "tls" and .direct_domains == 2' >/dev/null || fail 'status direct domains'

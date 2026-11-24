@@ -134,7 +134,14 @@ nft_render_base() {
 	# Separate additions let interval auto-merge absorb overlaps with fixed
 	# ranges and delegated aggregates. Sort for stable refresh comparisons.
 	for set in 4 6; do
-		nft_connected_prefixes "$set" | sort -u | while IFS= read -r prefix; do
+		if [ "$set" = 4 ] && [ "${NFT_PREFIXES_CAPTURED:-0}" = 1 ]; then
+			printf '%s\n' "$NFT_PREFIXES_4"
+		elif [ "$set" = 6 ] && [ "${NFT_PREFIXES_CAPTURED:-0}" = 1 ]; then
+			printf '%s\n' "$NFT_PREFIXES_6"
+		else
+			nft_connected_prefixes "$set"
+		fi | sort -u | while IFS= read -r prefix; do
+			[ -n "$prefix" ] || continue
 			nft_line "add element inet $t localv$set { $prefix }"
 		done
 	done
@@ -146,7 +153,6 @@ nft_render_base() {
 	nft_line "add chain inet $t prerouting_policy"
 	nft_line "add chain inet $t mangle_output { type route hook output priority mangle; policy accept; }"
 	nft_line "add chain inet $t proxy_redirect { type filter hook prerouting priority dstnat; policy accept; }"
-	nft_line "add chain inet $t api_guard { type filter hook output priority filter; policy accept; }"
 }
 
 # Reject only forwarded non-local client IPv6; returns leave fw4 in control.
@@ -410,11 +416,6 @@ nft_render() {
 		nft_render_fakeip mangle_output
 	fi
 	[ "$DISABLE_QUIC" = "1" ] && nft_rule mangle_output "meta mark & $NFT_INTERCEPT_MARK == $NFT_INTERCEPT_MARK udp dport 443 meta mark set meta mark ^ $NFT_INTERCEPT_MARK reject"
-
-	# Spec 16: a provider outbound must not reach the unauthenticated gRPC API;
-	# the unmarked `xray api` CLI still can.
-	nft_rule api_guard "meta mark & 0x000000ff == $XRAY_ROUTING_MARK ip daddr 127.0.0.0/8 tcp dport $XRAY_API_PORT reject with tcp reset"
-	nft_rule api_guard "meta mark & 0x000000ff == $XRAY_ROUTING_MARK ip6 daddr ::1 tcp dport $XRAY_API_PORT reject with tcp reset"
 	return 0
 }
 
@@ -438,11 +439,15 @@ nft_input_hash() {
 			"${NETBIRD_INTERFACE:-}" "${NETBIRD_MARK:-}" "${NETBIRD_PROXY:-}" \
 			"$NFT_TABLE_NAME" "$NFT_INTERCEPT_MARK" "$NFT_DIRECT_MARK" "$NFT_DISCORD_VOICE_CT_MARK" \
 			"$XRAY_ROUTING_MARK" "$XRAY_DNS_PORT" "$XRAY_TPROXY_PORT" \
-			"$XRAY_DIRECT_TPROXY_PORT" "$XRAY_API_PORT" "$FAKEIP_RANGE" \
+			"$XRAY_DIRECT_TPROXY_PORT" "$FAKEIP_RANGE" \
 			"$ZAPRET_DESYNC_MARK" "$ZAPRET_DESYNC_MARK_POSTNAT" \
 			"$LOCAL_NETS_V4" "$LOCAL_NETS_V6"
 		route_ipv6_enabled && printf '%s\n' '--ipv6--'
-		{ nft_connected_prefixes 4; nft_connected_prefixes 6; } | sort -u
+		if [ "${NFT_PREFIXES_CAPTURED:-0}" = 1 ]; then
+			printf '%s\n' "$NFT_PREFIXES_4" "$NFT_PREFIXES_6" | sed '/^$/d' | sort -u
+		else
+			{ nft_connected_prefixes 4; nft_connected_prefixes 6; } | sort -u
+		fi
 	} | sha256sum
 }
 
@@ -500,7 +505,9 @@ nft_apply() {
 	settings_require || return 1
 
 	local dir="$PKG_TMP_DIR/nft" rc=0 hash="" previous="" inputs="" previous_inputs=""
-	local DISCORD_ACCOUNTING
+	local DISCORD_ACCOUNTING NFT_PREFIXES_CAPTURED=1 NFT_PREFIXES_4 NFT_PREFIXES_6
+	NFT_PREFIXES_4="$(nft_connected_prefixes 4)"
+	NFT_PREFIXES_6="$(nft_connected_prefixes 6)"
 	DISCORD_ACCOUNTING="$(cat "${ROUTE_PROC_ROOT:-/proc}/sys/net/netfilter/nf_conntrack_acct" 2>/dev/null)" || DISCORD_ACCOUNTING=""
 
 	inputs="$(nft_input_hash)" || inputs=""

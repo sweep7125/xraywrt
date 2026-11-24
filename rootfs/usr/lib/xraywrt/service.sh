@@ -130,16 +130,16 @@ uninstall_cleanup() {
 # Build and check a runtime config from $XRAY_CONFIG; remember the result.
 # Without the core the generated config stays for status, the check fails.
 runtime_config_build() {
-	local key="" inputs=""
+	local key="" inputs="" params="" XRAY_RULE_REMOTE=""
 
 	geodata_recover || return 1
 	# Recovery or a completed switch during the lock wait may have changed the active settings.
 	subscription_recover || warn "Cannot repair an interrupted subscription switch; the next start tries again"
 	settings_load || return 1
 
-	inputs="$(xray_config_key "$XRAY_CONFIG" 2>/dev/null)" || inputs=""
+	xray_config_prepare "$XRAY_CONFIG"
 	runtime_config_key_store ""
-	xray_config_generate "$XRAY_CONFIG" "$1" || {
+	xray_config_generate "$XRAY_CONFIG" "$1" "" "$params" || {
 		# A rejected config fails the same way on every hotplug retry.
 		# The parser's reason is already the last error; the check itself failed.
 		[ "$?" != 2 ] || { CONFIG_TEST_OUTPUT="" GEODATA_TRANSIENT=0; config_check_record err && : >"$CONFIG_INVALID_FILE"; }
@@ -167,10 +167,13 @@ runtime_config_build() {
 cron_update() {
 	settings_require || return 1
 
-	local enabled=0
+	local enabled=0 urls=""
 
 	[ "$SUBSCRIPTION_INTERVAL" -gt 0 ] && [ -n "$SUBSCRIPTION_URL" ] && enabled=1
-	[ "$LISTS_INTERVAL" -gt 0 ] && [ -n "$(lists_urls)" ] && enabled=1
+	if [ "$enabled" -eq 0 ] && [ "$LISTS_INTERVAL" -gt 0 ]; then
+		urls="$(lists_urls)" || return 1
+		[ -z "$urls" ] || enabled=1
+	fi
 	cron_sync "$CRON_MARKER" "$enabled" "$CRON_MINUTE * * * * /usr/bin/xraywrt auto-update >/dev/null 2>&1"
 }
 
@@ -224,7 +227,7 @@ wait_for_ready() {
 		# Called from run_service: abort when a stop was requested.
 		[ "${stop:-0}" -eq 0 ] || return 1
 		kill -0 "$pid" 2>/dev/null || return 1
-		port_listening tcp "$XRAY_TPROXY_PORT" && port_listening udp "$XRAY_DNS_PORT" && return 0
+		[ -S "$XRAY_API_SOCKET" ] && port_listening tcp "$XRAY_TPROXY_PORT" && port_listening udp "$XRAY_DNS_PORT" && return 0
 		sleep 1
 		i=$((i + 1))
 	done
@@ -252,6 +255,12 @@ stop_child() {
 
 # Start the core on $RUNTIME_CONFIG; sets pid (run_service local).
 core_spawn() {
+	pid=""
+	chmod 700 "$PKG_STATE_DIR" || return 1
+	# Ferrum leaves the socket after SIGKILL. Its lock is released by the kernel.
+	if [ -S "$XRAY_API_SOCKET" ]; then
+		flock -n "$XRAY_API_SOCKET.lock" rm -f "$XRAY_API_SOCKET" || return 1
+	fi
 	rm -f "$OBSERVATORY_FILE"
 	geodata_snapshot || { rm -f "$RUNTIME_CONFIG.geodata" "$RUNTIME_CONFIG.geodata.tmp.$$"; warn "Cannot record core geodata state; hot apply disabled"; }
 	XRAY_LOCATION_ASSET="$XRAY_SHARE_DIR" "$XRAY_BIN" run -c "$RUNTIME_CONFIG" 9>&- &
@@ -390,8 +399,20 @@ service_recovery_reload() {
 	runtime_refresh || rc=$?
 	# Stop may arrive while core_restart waits for the supervisor.
 	service_recovery_allowed "$1" || return 0
-	if policy_reapply_ready; then
-		atomic_write "$RUNNING_MARKER" "$1" || return 1
+	if policy_reapply; then
+		if ! service_recovery_allowed "$1"; then
+			policy_cleanup
+			return 0
+		fi
+		if ! atomic_write "$RUNNING_MARKER" "$1"; then
+			policy_cleanup
+			return 1
+		fi
+		if ! service_recovery_allowed "$1"; then
+			[ "$(cat "$RUNNING_MARKER" 2>/dev/null)" != "$1" ] || rm -f "$RUNNING_MARKER"
+			policy_cleanup
+			return 0
+		fi
 		rm -f "$DEGRADED_FILE" "$LAST_ERROR_FILE" "$APPLY_WARNING_FILE"
 		if [ "$rc" -ne 0 ]; then
 			atomic_write "$APPLY_WARNING_FILE" "$(code_message recovery_inputs 'The latest changes could not be applied. XrayWRT is using the previous working configuration. Review the settings or update the subscription.')" || return 1
@@ -438,9 +459,7 @@ run_service() {
 		# The kernel frees the ports a moment after the kill.
 		kill -9 "$pid" 2>/dev/null && sleep 1
 	done
-	core_spawn
-
-	if ! wait_for_ready "$pid"; then
+	if ! { core_spawn && wait_for_ready "$pid"; }; then
 		service_error "core did not become ready; router stays on direct routing"
 	elif with_lock service_ready_apply 2>"$error"; then
 		cat "$error" >&2
@@ -468,8 +487,7 @@ run_service() {
 				# core_restart asked for the new runtime config.
 				restart=0
 				stop_child "$pid"
-				core_spawn
-				if wait_for_ready "$pid"; then
+				if core_spawn && wait_for_ready "$pid"; then
 					balancer_overrides_apply
 					atomic_write "$RESTART_RESULT_FILE" ok
 				else
@@ -619,12 +637,12 @@ service_reload() {
 # with the same core geodata never restarts the core. 0 = up to date, 1 = rejected (live config kept),
 # 2 = publish failed.
 runtime_refresh() {
-	local candidate="$PKG_TMP_DIR/config.candidate.json" inputs="" stored=""
+	local candidate="$PKG_TMP_DIR/config.candidate.json" inputs="" stored="" params="" XRAY_RULE_REMOTE=""
 
-	inputs="$(xray_config_key "$XRAY_CONFIG" 2>/dev/null)" || inputs=""
+	xray_config_prepare "$XRAY_CONFIG"
 	{ IFS= read -r stored <"$RUNTIME_CONFIG.inputs"; } 2>/dev/null || :
 	[ -z "$inputs" ] || [ "$inputs" != "$stored" ] || ! [ -f "$RUNTIME_CONFIG" ] || ! [ -f "$PROFILE_FILE" ] || ! geodata_unchanged || return 0
-	xray_config_generate "$XRAY_CONFIG" "$candidate" || {
+	xray_config_generate "$XRAY_CONFIG" "$candidate" "" "$params" || {
 		rm -f "$candidate" "$candidate.profile"
 		return 1
 	}
@@ -671,7 +689,7 @@ auto_update() {
 		subscription_update || rc=1
 	fi
 	if [ "$LISTS_INTERVAL" -gt 0 ]; then
-		urls="$(lists_urls)"
+		urls="$(lists_urls)" || return 1
 		if [ -n "$urls" ]; then
 			result="$(lists_update_remote 0 "$urls")" || rc=1
 			[ "$result" != changed ] || with_lock auto_update_policy || rc=1

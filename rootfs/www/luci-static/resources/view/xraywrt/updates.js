@@ -189,18 +189,19 @@ function geodataSection(status) {
 	const name = E('input', { id: 'mw-geo-name', type: 'text', class: 'cbi-input-text', autocomplete: 'off', spellcheck: 'false', placeholder: 'geosite.dat' });
 	const file = fileInput('mw-geo-file', _('Rule database file'));
 	const upload = E('button', { 'data-mw-job': '', class: 'cbi-button', disabled: api.jobRunning || null }, text(_('Upload')));
-	upload.addEventListener('click', () => api.busy(upload, async () => {
+	upload.addEventListener('click', async () => {
+		if (upload.disabled || api.jobRunning) return;
 		const chosen = file.files?.[0], target = name.value.trim() || chosen?.name || '';
-		if (!chosen)
-			throw new Error(_('Choose the .dat file first.'));
-		if (!api.GEODATA_NAME.test(target))
-			throw new Error(_('The name must end with .dat and contain only letters, digits, dot, dash and underscore.'));
-		if (chosen.size > api.CORE_ASSET_MAX_BYTES)
-			throw new Error(_('The file is larger than 64 MB.'));
+		const error = !chosen ? _('Choose the .dat file first.')
+			: !api.GEODATA_NAME.test(target) ? _('The name must end with .dat and contain only letters, digits, dot, dash and underscore.')
+			: chosen.size > api.CORE_ASSET_MAX_BYTES ? _('The file is larger than 64 MB.') : null;
+		if (error) return api.notify(error, 'error');
 		if (!await api.confirm(_('Upload a file'), _('Files used by your settings are checked before replacement unless another required file is still missing. Unused files cannot be checked now; they will be checked when settings start using them.'), _('Upload'))) return;
-		const path = await api.upload('xraywrt-geodata', chosen);
-		api.reloadResult(await api.geodataUpdate({ file: path, name: target }), _('Rule databases updated.'));
-	}));
+		return api.busy(upload, async () => {
+			const path = await api.upload('xraywrt-geodata', chosen);
+			api.reloadResult(await api.geodataUpdate({ file: path, name: target }), _('Rule databases updated.'));
+		});
+	});
 
 	return E('div', { class: 'cbi-section' }, [
 		E('h3', text(_('Rule databases'))),

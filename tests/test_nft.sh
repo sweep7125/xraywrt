@@ -346,18 +346,6 @@ pass 'personal selectors run in file order in both modes and chains'
  pass 'masked Xray self-bypass'
 )
 
-# Spec 16: the core's own (marked) dials cannot reach its gRPC API on loopback.
-(
- for POLICY_MODE in direct-first proxy-first; do
-  render
-  assert_file_contains "$out" 'add chain inet xraywrt api_guard { type filter hook output priority filter; policy accept; }' "$POLICY_MODE API guard chain"
-  assert_file_contains "$out" "add rule inet xraywrt api_guard meta mark & 0x000000ff == $XRAY_ROUTING_MARK ip daddr 127.0.0.0/8 tcp dport $XRAY_API_PORT reject with tcp reset" "$POLICY_MODE core IPv4 API dial rejected"
-  assert_file_contains "$out" "add rule inet xraywrt api_guard meta mark & 0x000000ff == $XRAY_ROUTING_MARK ip6 daddr ::1 tcp dport $XRAY_API_PORT reject with tcp reset" "$POLICY_MODE core IPv6 API dial rejected"
-  assert_eq 2 "$(grep -c '^add rule inet xraywrt api_guard ' "$out")" "$POLICY_MODE unmarked API CLI stays allowed"
- done
- pass 'core traffic cannot reach the API port'
-)
-
 # The matched interception bit must not leak into ICMP's reverse route lookup.
 (
  DISABLE_QUIC=1

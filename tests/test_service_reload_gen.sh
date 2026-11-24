@@ -10,7 +10,7 @@ export RELOAD_TEST_DIR="$tmpdir" RELOAD_FIXTURES="$ROOT_DIR/tests/fixtures/xray"
 # must. Scenarios run in BusyBox ash, the shell of the router.
 failed=0
 for scenario in same source uc_file rules remote_list wan_dns dns_port fakeip tproxy direct_tproxy mark \
-	mode log_level runtime_missing profile_missing no_key restart_failure test_rejected \
+	mode log_level runtime_missing profile_missing no_key reuse restart_failure test_rejected \
 	build_failed_test install_ok install_restore degraded_source degraded_rules degraded_rejected stopped; do
 	if ash -s "$scenario" <<'ASH'
 set -e
@@ -127,7 +127,32 @@ mode) UCI_MODE=direct-first ;;
 log_level) UCI_CORE_LOG_LEVEL=error; LOG_LEVEL_OVERRIDE=1 ;;
 runtime_missing) rm -f "$RUNTIME_CONFIG" ;;
 profile_missing) rm -f "$PROFILE_FILE" ;;
-no_key) sha256sum() { return 1; } ;;
+no_key)
+ # Fail only the generator library hash: URL cache names and generation still work.
+ sha256sum() {
+  [ "$#" -eq 0 ] || { command sha256sum "$@"; return; }
+  data="$(cat; printf x)"; data="${data%x}"
+  case "$data" in *'function group_rule_runs'*) return 1 ;; esac
+  printf '%s' "$data" | command sha256sum "$@"
+ }
+ ;;
+reuse)
+ eval "$(sed -n '/^lists_rules_remote_pairs() {/,/^}/p' "$XRAYWRT_LIB_DIR_REAL/lists.sh" | sed '1s/lists_rules_remote_pairs/lists_rules_remote_pairs_real/')"
+ eval "$(sed -n '/^xray_params_json() {/,/^}/p' "$XRAYWRT_LIB_DIR_REAL/xray-config.sh" | sed '1s/xray_params_json/xray_params_json_real/')"
+ lists_rules_remote_pairs() { echo pairs >>"$test_root/captures"; lists_rules_remote_pairs_real; }
+ xray_params_json() { echo params >>"$test_root/captures"; xray_params_json_real; }
+ xray_config_generate() {
+  if [ "${3:-}" = key ]; then
+   printf '%s' "$4" >"$test_root/key.params"
+  else
+   echo gen >>"$test_root/generations"
+   printf '%s' "$4" >"$test_root/gen.params"
+  fi
+  xray_config_generate_real "$@"
+ }
+ # Force generation, then ensure both paths consume exactly one snapshot.
+ rm -f "$RUNTIME_CONFIG"
+ ;;
 restart_failure)
 	# A core that does not restart rolls back: the key must not claim the rolled-back config.
 	sed -i 's/"port": 443/"port": 8443/' "$XRAY_CONFIG"
@@ -204,6 +229,13 @@ rc=0
 service_reload || rc=$?
 [ "$rc" -eq 0 ]
 require "$expect"
+if [ "$scenario" = reuse ]; then
+ [ "$(cat "$test_root/captures")" = "$(printf 'pairs\nparams')" ] || { echo 'inputs captured more than once' >&2; exit 1; }
+ cmp -s "$test_root/key.params" "$test_root/gen.params" || { echo 'key and generator used different params' >&2; exit 1; }
+fi
+if [ "$scenario" = no_key ]; then
+ [ ! -e "$inputs" ] || { echo 'failed key was stored' >&2; exit 1; }
+fi
 if [ "$scenario" = same ]; then
 	[ "$(cat "$test_root/events")" = apply ] || { echo 'unchanged reload did more than apply policy' >&2; exit 1; }
 else

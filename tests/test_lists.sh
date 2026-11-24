@@ -312,7 +312,7 @@ pass 'remote size'
  cp "$current" "$tmpdir/gc/current.before"
  cp "$removed" "$tmpdir/gc/removed.before"
  profile_ensure() { return 1; }
- lists_cache_gc
+ assert_false 'gc reports profile failure' lists_cache_gc
  assert_true 'gc skipped without profile: current cache untouched' cmp -s "$current" "$tmpdir/gc/current.before"
  assert_true 'gc skipped without profile: unused cache untouched' cmp -s "$removed" "$tmpdir/gc/removed.before"
  load_modules xray-config.sh
@@ -322,6 +322,24 @@ pass 'remote size'
  assert_false 'readable profile permits unused cache cleanup' test -e "$removed"
 )
 pass 'gc skipped without profile'
+
+# A failed URL hash must never delete caches or fetch to an empty path.
+(
+ setup_runtime_paths "$tmpdir/gc-hash"
+ POLICY_CACHE_DIR="$tmpdir/gc-hash/cache"
+ mkdir -p "$POLICY_CACHE_DIR"
+ printf 'cached\n' >"$POLICY_CACHE_DIR/saved.txt"
+ sha256sum() { return 1; }
+ assert_false 'failed URL hash rejects GC' lists_cache_gc 'https://example.test/list'
+ assert_true 'failed GC retains caches' test -f "$POLICY_CACHE_DIR/saved.txt"
+ lists_cache_gc() { return 0; }
+ http_fetch() { fail 'fetch called with no cache key'; }
+ assert_false 'failed cache key rejects update' lists_update_remote 1 'https://example.test/list' >/dev/null 2>&1
+ assert_true 'failed update retains caches' test -f "$POLICY_CACHE_DIR/saved.txt"
+)
+pass 'cache hash failure preserves lists and stops fetch'
+
+
 
 printf 'https://current.example/a core\n' >"$RULES_FILE"
 current="$(lists_cache_file https://current.example/a)"

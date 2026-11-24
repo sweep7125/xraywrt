@@ -306,6 +306,29 @@ pass 'DNS safety automatic refresh and actual subscription switches preserve iso
 pass 'DNS safety subscription copying reports persistence failure'
 
 (
+ setup_safety subscription-list-copy-failure
+ SUBSCRIPTION_SETTINGS=''
+ SUBSCRIPTION_SETTING_LISTS='test_list'
+ subscription_uci_items() { printf 'item\n'; }
+ eval "saved_$(declare -f uci)"
+ uci() { case "$*" in *' add_list '*) return 1 ;; esac; saved_uci "$@"; }
+ if subscription_copy_settings settings s1; then fail 'failed list copy succeeded'; fi
+ assert_false 'failed list copy removes temporary items' test -e "$PKG_TMP_DIR/subscription.$$.items"
+)
+pass 'subscription list copy cleans up after UCI failure'
+
+(
+ setup_safety subscription-list-stage-failure
+ SUBSCRIPTION_SETTINGS=''
+ SUBSCRIPTION_SETTING_LISTS='test_list'
+ subscription_uci_items() { printf 'partial\n'; return 1; }
+ uci() { fail 'UCI must not be touched after staging fails'; }
+ if subscription_copy_settings settings s1; then fail 'failed staging succeeded'; fi
+ assert_false 'failed staging removes temporary items' test -e "$PKG_TMP_DIR/subscription.$$.items"
+)
+pass 'subscription list staging failure preserves destination'
+
+(
  setup_safety failed-start
  cp "$PKG_TMP_DIR/candidate" "$XRAY_CONFIG"
  rm -f "$RUNTIME_CONFIG" "$PROFILE_FILE"

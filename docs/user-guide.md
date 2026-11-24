@@ -10,7 +10,7 @@ supported. On **Subscription**, enter a JSON subscription URL and press
 only one is active and configurations are not merged. Each subscription keeps
 its own rules and server choice. Automatic updates cover the active subscription.
 
-Alternatively, enter your own JSON under **Advanced → Xray configuration**.
+Alternatively, enter your own JSON under **Advanced → Xray config**.
 Subscription updates replace the current `config.json`; its previous version is
 kept as `config.json.bak` and can be restored in the editor. Review your config
 before switching or updating. Subscription safety filtering restricts listeners;
@@ -75,16 +75,19 @@ Their Fake-IP traffic uses the selected `DIRECT` outbound.
 
 ## DNS
 
-Router DNS redirection is off by default and can be enabled in **Advanced → DNS**.
+**Hijack DNS** in **Advanced → DNS** is off by default.
 Clients using the router as their DNS server still use its DNS path; encrypted DNS
 (DoH/DoT) can bypass redirection. Fake-IP uses IPv4 and mappings are lost when the core restarts. Other query types
 such as TXT, SRV and MX receive empty answers by default. Under **Advanced → DNS**
 you can enable direct forwarding in direct-first mode, or VPN forwarding.
 VPN forwarding requires an explicit DNS server IP and a suitable outbound tag.
-It never falls back to WAN DNS. If the saved tag disappears or is unsuitable,
+VPN forwarding never falls back to WAN DNS. If the saved tag disappears or is unsuitable,
 forwarding is forced off and a warning appears; select a valid tag and server
 and enable it again. A remote server may intercept DNS, so the chosen resolver
 may not receive queries. Confirm that chained outbounds use the intended VPN.
+
+**Block HTTPS/SVCB queries** returns empty answers for those types when
+forwarding other queries. FakeDNS can still block forwarding for names it handles.
 
 A conflicting DNS server or global dnsmasq forward can prevent startup. Stop the
 other server or remove global forwards, and configure resolvers on WAN or in the
@@ -98,6 +101,10 @@ Service → Start on boot** or use `service xraywrt enable` / `service xraywrt d
 to control autostart. Core updates are manual: choose **Updates → Update the core**
 or run `xraywrt core-update`. Subscriptions and remote lists have separate update
 controls. Core updates need free flash and RAM; check the Updates page first.
+
+When upgrading from a version that used the local TCP API, install core
+`0.26.5-r2` or newer before updating XrayWRT. The app uses the core API through
+a private Unix socket.
 
 Geodata is supplied by the configuration or by you, not bundled. Add a rule
 database on Updates if a configuration requires one. Downloaded geodata has no
@@ -129,6 +136,22 @@ Remove transferred APKs from `/tmp` afterward to free RAM. A manually installed
 core may lack a verified rollback package; the updater asks before continuing
 without a backup. Confirm only if you accept the recovery risk.
 
+## NetBird
+
+On a Cudy WR3000S v1, starting NetBird 0.81.4 with its default routing set
+`net.ipv4.conf.all.src_valid_mark=1`. HTTPS through Xray using FakeIP timed out,
+while direct HTTPS and DNS still worked. Both direct-first and proxy-first use
+the same IPv4 traffic interception, so either mode can be affected. The LuCI
+option to route outgoing NetBird traffic through VPN controls NetBird's own
+connections. The conflict can occur even with that option off.
+
+`NB_USE_LEGACY_ROUTING=true` in the NetBird service environment is a possible
+workaround. In NetBird 0.81.4 it skips setting `src_valid_mark` and changes
+how NetBird routes traffic. We have yet to verify remote access or exit nodes
+with this setting on OpenWrt.
+[NetBird settings](https://docs.netbird.io/client/environment-variables#networking-and-routing)
+· [NetBird 0.81.4 source](https://github.com/netbirdio/netbird/blob/v0.81.4/client/internal/routemanager/systemops/systemops_linux.go#L91)
+
 ## If internet is lost
 
 1. Open LuCI at your router address and choose **Services → XrayWRT → Home → Stop**,
@@ -153,6 +176,14 @@ remove the packages.
 
 ### Discord Voice
 
-Advanced → Routing offers Discord Voice, off by default. Providers can set the boolean `xraywrt.discord-voice`; each subscription can follow the provider or override it. Proxy-first ignores the request without changing the saved preference. In direct-first mode it sends recognized IPv4 discovery flows from configured client interfaces to the existing Xray ingress. Existing device and address decisions still apply; Xray chooses the outbound. The signature is heuristic and does not identify every Discord flow. The feature requires conntrack accounting (`net.netfilter.nf_conntrack_acct=1`); if unavailable, the normal policy remains active and the detector is skipped. Enable accounting using your system configuration, then reload XrayWRT.
+Advanced → Routing offers Discord Voice, off by default. When a subscription
+sets `xraywrt.discord-voice`, the menu offers **From subscription**, **Enabled**
+and **Disabled**. With the flag absent, it shows a checkbox. **Block HTTPS/SVCB
+queries** works the same way with `xraywrt.block-https-svcb`.
+
+Discord Voice applies only in direct-first mode. It sends detected IPv4 discovery
+traffic from selected client interfaces to Xray, which picks the route. Device
+and address rules still apply. Detection requires conntrack accounting
+(`net.netfilter.nf_conntrack_acct=1`) and may miss some calls.
 
 The detector uses conntrack mark bit `0x01000000`, preserving other bits. XrayWRT has no other conntrack mark owner; packet mark values are separate, but third-party firewall, QoS or VPN rules can copy marks between namespaces or reuse this bit. Enable it only when XrayWRT has exclusive ownership of that conntrack bit on a known supported stack. Arbitrary third-party use of the same bit is unsupported. Flow offload can bypass packet inspection and is not certified. Turning the option off does not clear existing conntrack marks; an existing marked flow can resume detection when re-enabled.

@@ -123,13 +123,15 @@ lists_profile_filter() {
 	mv -f "$profile.tmp" "$profile"
 }
 
-lists_provider_entries() {
+lists_provider_entries() (
+	set -o pipefail
+	[ ! -e "$PROFILE_FILE" ] || [ -r "$PROFILE_FILE" ] || return 1
 	case "$1" in
 	dst) profile_entries proxy-ip | lists_clean_lines ;;
 	direct) profile_entries direct-ip | lists_clean_lines ;;
+	*) return 1 ;;
 	esac
-	return 0
-}
+)
 
 # Target tags of the configuration, as the generator recorded them.
 lists_rule_targets() {
@@ -139,34 +141,57 @@ lists_rule_targets() {
 # Addresses and list links of My rules whose target is direct, or all others
 # (core and tags). Lines whose target is not in the configuration are skipped,
 # as in the generator.
-lists_rules_entries() {
-	[ -r "$RULES_FILE" ] || return 0
+lists_rules_entries() (
+	set -o pipefail
+	[ -e "$RULES_FILE" ] || return 0
+	[ -r "$RULES_FILE" ] || return 1
 	lists_rule_targets | xraywrt-json rules entries "$RULES_FILE" "$1"
-}
+)
 
 # Every list link of My rules, whatever its target.
 lists_rules_urls() {
-	[ -r "$RULES_FILE" ] || return 0
+	[ -e "$RULES_FILE" ] || return 0
+	[ -r "$RULES_FILE" ] || return 1
 	xraywrt-json rules urls "$RULES_FILE"
+}
+
+# Capture URL-to-cache mappings once for a generation operation.
+lists_rules_remote_pairs() {
+	local url="" cache="" urls=""
+	urls="$(lists_rules_urls)" || return 1
+	while IFS= read -r url; do
+		[ -n "$url" ] || continue
+		cache="$(lists_cache_file "$url")" || return 1
+		printf '%s\t%s\n' "$url" "$cache"
+	done <<EOF
+$urls
+EOF
 }
 
 # Where the generator finds the cache of each link of My rules.
 lists_rules_remote_json() {
-	local url=""
-
-	lists_rules_urls | while IFS= read -r url; do
-		printf '%s\t%s\n' "$url" "$(lists_cache_file "$url")"
-	done | xraywrt-json pairs
+	local pairs=""
+	pairs="${XRAY_RULE_REMOTE-$(lists_rules_remote_pairs)}" || return 1
+	printf '%s\n' "$pairs" | xraywrt-json pairs
 }
 
-# The generator output depends on the fetched lists that feed routing rules.
+# Include the cache identity and missing state, not just existing bytes.
 lists_rules_remote_hashes() {
-	local url="" cache=""
-
-	lists_rules_urls | while IFS= read -r url; do
-		cache="$(lists_cache_file "$url")"
-		[ ! -f "$cache" ] || sha256sum <"$cache"
-	done
+	local url="" cache="" hash="" pairs="" tab=""
+	tab="$(printf '\t')"
+	pairs="${XRAY_RULE_REMOTE-$(lists_rules_remote_pairs)}" || return 1
+	while IFS="$tab" read -r url cache; do
+		[ -n "$url" ] || continue
+		printf '%s\n' "$cache"
+		if [ -f "$cache" ]; then
+			hash="$(sha256sum <"$cache")" || return 1
+			printf 'present %s\n' "$hash"
+		else
+			printf 'missing\n'
+		fi
+	done <<EOF
+$pairs
+EOF
 }
 
 # Cleaned entries for one kind. Only proxy-first uses the provider direct list.
@@ -176,16 +201,16 @@ lists_source() {
 
 	case "$kind" in
 	dst)
-		lists_provider_entries dst
-		[ "$only" = provider ] || lists_rules_entries proxy
+		lists_provider_entries dst || return 1
+		[ "$only" = provider ] || lists_rules_entries proxy || return 1
 		;;
 	direct)
-		[ "${POLICY_MODE:-}" != proxy-first ] || lists_provider_entries direct
-		[ "$only" = provider ] || lists_rules_entries direct
+		[ "${POLICY_MODE:-}" != proxy-first ] || lists_provider_entries direct || return 1
+		[ "$only" = provider ] || lists_rules_entries direct || return 1
 		;;
 	src | direct_src)
 		file="$(lists_file "$kind")"
-		[ ! -r "$file" ] || lists_clean_lines "$file"
+		[ ! -e "$file" ] || { [ -r "$file" ] && lists_clean_lines "$file"; } || return 1
 		;;
 	*) return 1 ;;
 	esac
@@ -290,33 +315,59 @@ lists_clean_lines() {
 }
 
 lists_url_key() {
-	printf '%s' "$1" | sha256sum | cut -c1-16
+	local hash=""
+	hash="$(printf '%s' "$1" | sha256sum)" || return 1
+	printf '%.16s' "$hash"
 }
 
 lists_cache_file() {
-	printf '%s/%s.txt' "$POLICY_CACHE_DIR" "$(lists_url_key "$1")"
+	local key=""
+	key="$(lists_url_key "$1")" || return 1
+	printf '%s/%s.txt' "$POLICY_CACHE_DIR" "$key"
 }
 
-lists_urls() {
-	local kind=""
+lists_urls() (
+	local kind="" POLICY_MODE="${POLICY_MODE:-}"
+	set -o pipefail
+	if [ -e "$XRAY_CONFIG" ]; then
+		[ -r "$XRAY_CONFIG" ] || return 1
+		profile_ensure || return 1
+		POLICY_MODE="$(profile_get mode)" || return 1
+		case "$POLICY_MODE" in direct-first | proxy-first) ;; *) POLICY_MODE=proxy-first ;; esac
+	fi
 
 	{
 		for kind in dst src direct direct_src; do
-			lists_source "$kind"
+			lists_source "$kind" || exit 1
 		done
-		lists_rules_urls
+		lists_rules_urls || exit 1
 	} | sed -n 's/;.*//; /^https\?:\/\//p' | awk '!seen[$0]++'
-}
+)
 
 # Retain caches for every current URL, including those beyond the fetch cap.
 lists_cache_gc() {
-	local keys="" cache="" url=""
+	local keys="" cache="" url="" urls="" key=""
 
-	[ -r "$XRAY_CONFIG" ] && ! profile_ensure && return 0
-	keys="$(printf '%s\n' "${1-$(lists_urls)}" | while IFS= read -r url; do lists_url_key "$url"; echo; done)"
+	urls="${1-$(lists_urls)}" || return 1
+	while IFS= read -r url; do
+		[ -n "$url" ] || continue
+		key="$(lists_url_key "$url")" || return 1
+		keys="$keys
+$key"
+	done <<EOF
+$urls
+EOF
 	for cache in "$POLICY_CACHE_DIR"/*.txt; do
 		[ -f "$cache" ] || continue
-		printf '%s\n' "$keys" | grep -Fxq "$(basename "$cache" .txt)" || rm -f "$cache" "$(lists_stamp_file "$cache")"
+		key="${cache##*/}"
+		key="${key%.txt}"
+		case "$keys
+" in
+		*"
+$key
+"*) ;;
+		*) rm -f "$cache" "$(lists_stamp_file "$cache")" ;;
+		esac
 	done
 }
 
@@ -341,7 +392,7 @@ lists_resolve() {
 
 	src="$PKG_TMP_DIR/list.$kind.$$"
 	ensure_dir "$PKG_TMP_DIR" || return 1
-	lists_source "$kind" "$only" >"$src" || return 1
+	lists_source "$kind" "$only" >"$src" || { rm -f "$src"; return 1; }
 	if ! { : >"$out4" && : >"$out6" && { [ -z "$outmac" ] || : >"$outmac"; }; }; then
 		rm -f "$src"
 		return 1
@@ -416,9 +467,10 @@ lists_remote_due() {
 
 # Fetch due remote lists into the cache. Prints "changed" or "unchanged".
 lists_update_remote() {
-	local force="${1:-0}" urls="${2-$(lists_urls)}" url="" cache="" tmp="" line="" count=0 changed=0 failed=0 first_error=""
+	local force="${1:-0}" urls="" url="" cache="" tmp="" line="" count=0 changed=0 failed=0 first_error=""
 	local total="" next_total=""
 
+	urls="${2-$(lists_urls)}" || return 1
 	ensure_dir "$POLICY_CACHE_DIR" && ensure_dir "$PKG_STATE_DIR/lists-stamp" || return 1
 	lists_cache_gc "$urls" || return 1
 	tmp="$PKG_TMP_DIR/list.$$"
@@ -431,7 +483,13 @@ lists_update_remote() {
 			break
 		}
 		count=$((count + 1))
-		cache="$(lists_cache_file "$url")"
+		if ! cache="$(lists_cache_file "$url")"; then
+			line="Remote list cache key failed: $(url_host "$url")"
+			warn "$line"
+			[ -n "$first_error" ] || first_error="$line"
+			failed=$((failed + 1))
+			continue
+		fi
 		[ "$force" = "1" ] || lists_remote_due "$cache" || continue
 		if ! http_fetch "$url" "$tmp" "$LISTS_REMOTE_MAX_BYTES" "$LISTS_REMOTE_TIMEOUT" 0; then
 			line="Remote list fetch failed: $(url_host "$url") ($FETCH_ERROR)"

@@ -235,6 +235,18 @@ function build(shape, a) {
 			return {file: f[0], asset: f[1] == '1', referenced: f[2] == '1', present: f[3] == '1', size: num(f[4]), mtime: num(f[5])};
 		})
 	};
+	case 'profile-compact':
+		let compact = {netbird: a.netbird == '1', subscription: {configured: a.configured == '1', config_backup: a.backup == '1', auto_update: a.auto != '0'}};
+		if (a.valid == '1') {
+			let compact_provider = {};
+			for (let row in lines(a.provider)) { let p = split(row, ' '); compact_provider[p[0]] = p[1]; }
+			compact.mode = a.mode;
+			compact.provider = compact_provider;
+			compact.dns_outbounds = a.dns_outbounds ?? [];
+			compact.dns_raw_lost = dns_raw_lost(a);
+			compact.provider_lists = a.provider_lists == '1';
+		}
+		return compact;
 	case 'profile':
 		let provider = {};
 		for (let row in lines(a.provider)) { let p = split(row, ' '); provider[p[0]] = p[1]; }
@@ -317,14 +329,16 @@ try {
 	}
 	case 'history': {
 		let action = shift(ARGV), jobs = [];
-		if (action == 'sort') {
+		if (action == 'sort' || action == 'sort-last' || action == 'sort-prune') {
 			for (let path in ARGV) push(jobs, parse(read(path)));
 			sort(jobs, (a, b) => {
 				let av = [a.started, ...map(split(a.id, '-'), num)], bv = [b.started, ...map(split(b.id, '-'), num)];
 				for (let i = 0; i < length(av); i++) if (numeric(av[i]) != numeric(bv[i])) return numeric(av[i]) < numeric(bv[i]) ? -1 : 1;
 				return 0;
 			});
-			emit(jobs, true);
+			if (action == 'sort') emit(jobs, true);
+			else if (action == 'sort-last') print(raw(fallback(jobs[-1]?.id, '')), '\n');
+			else for (let j in slice(filter(jobs, (j) => j.state != 'running'), 0, -5)) print(raw(j.id), '\n');
 		} else {
 			let s = read();
 			if (!length(trim(s))) break;
@@ -473,7 +487,10 @@ try {
 		// valid target tags of the configuration come on stdin, one per line.
 		let op = shift(ARGV), file = shift(ARGV);
 		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
-		let text = readfile(file) ?? '', tags = op == 'urls' ? [] : lines(read());
+		let text = readfile(file);
+		if (text == null && (op == 'urls' || op == 'entries')) die('Cannot read rules file');
+		text ??= '';
+		let tags = op == 'urls' ? [] : lines(read());
 		if (op == 'check') {
 			for (let e in gen.check_rules(text, tags)) print(e.line, '\t', e.code, '\t', e.target || '-', '\t', e.text, '\n');
 		} else if (op == 'entries') {

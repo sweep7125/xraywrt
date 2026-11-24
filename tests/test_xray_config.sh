@@ -216,7 +216,7 @@ assert_eq "$(jq -c .inbounds "$FX/src/full.json")" "$(jq -c '.inbounds[:2]' <<<"
 ! grep -q 'inbound' <<<"$prof" || fail "provider inbounds: no warning: $prof"
 src_json '{"outbounds":[{"protocol":"freedom"}],"inbounds":[{"tag":"xraywrt-lan","port":1080,"protocol":"socks"}]}'
 gen_fails "$tmpdir/src.json" 'config: tag "xraywrt-lan" uses reserved prefix xraywrt-'
-for p in 7894 '"7895"' '"1000-7874"' '"80,10085"'; do
+for p in 7894 '"7895"' '"1000-7874"' '"80,7894"'; do
 	src_json "{\"outbounds\":[{\"protocol\":\"freedom\"}],\"inbounds\":[{\"port\":$p,\"protocol\":\"socks\"}]}"
 	gen_fails "$tmpdir/src.json" "config: inbound #1 port $(tr -d '"' <<<"$p") collides with a router port"
 done
@@ -475,12 +475,9 @@ assert_eq 'xraywrt-tproxy4 xraywrt-dns-in' "$(jq -r '[.inbounds[].tag] | join(" 
 src_json '{"outbounds": [{"protocol": "freedom"}], "dns": {"servers": ["fakedns"]}}'
 gen "$tmpdir/src.json"
 jq -e '[.inbounds[].tag] | index("xraywrt-fakeip-direct") != null' <<<"$out" >/dev/null || fail 'string fakedns server'
-gen "$FX/src/single.json" '.ports = {tproxy: 17894, direct: 17895, dns: 17874, api: 11085}'
+gen "$FX/src/single.json" '.ports = {tproxy: 17894, direct: 17895, dns: 17874} | .api_listen = "/tmp/xraywrt-test.sock,0600"'
 assert_eq '17894 17894 17874' "$(jq -r '[.inbounds[].port] | join(" ")' <<<"$out")" 'ports from params'
-assert_eq '127.0.0.1:11085' "$(jq -r .api.listen <<<"$out")" 'API port from params'
-for port in tproxy direct dns; do
-	gen_fails "$FX/src/single.json" 'config: API port 7874 collides with a router port' ".ports.$port = 7874 | .ports.api = 7874"
-done
+assert_eq '/tmp/xraywrt-test.sock,0600' "$(jq -r .api.listen <<<"$out")" 'API socket from params'
 pass 'router inbounds'
 
 # A5.7 service routing rules before the provider's (spec 6.5).
@@ -556,13 +553,14 @@ pass 'null provider array entries'
 src_json '{"outbounds":[{"tag":"direct","protocol":"freedom"}],"inbounds":[{"tag":"other","port":10086,"protocol":"http"}],"api":{"tag":"evil","services":["LoggerService"]}}'
 gen "$tmpdir/src.json"
 assert_eq 0 "$rc" "provider API ownership: $errtxt"
-jq -e '.api == {tag:"xraywrt-api", listen:"127.0.0.1:10085", services:["HandlerService","RoutingService","StatsService"]}' <<<"$out" >/dev/null || fail 'router API listens itself'
-assert_eq '[]' "$(jq -c '[.inbounds[] | select(.port == 10085 or .tag == "xraywrt-api")]' <<<"$out")" 'no API inbound: provider routing cannot reach it'
+jq -e '.api == {tag:"xraywrt-api", listen:"/var/run/xraywrt/api.sock,0600", services:["HandlerService","RoutingService","StatsService"]}' <<<"$out" >/dev/null || fail 'router API listens itself'
+assert_eq '[]' "$(jq -c '[.inbounds[] | select(.tag == "xraywrt-api")]' <<<"$out")" 'no API inbound: provider routing cannot reach it'
 assert_eq '[]' "$(jq -c '[.routing.rules[] | select(.outboundTag == "xraywrt-api" or (.inboundTag // [] | index("xraywrt-api")))]' <<<"$out")" 'no API routing rule'
 src_json '{"outbounds":[{"protocol":"freedom"}],"inbounds":[{"tag":"xraywrt-api","listen":"0.0.0.0","port":10086,"protocol":"socks"}]}'
 gen_fails "$tmpdir/src.json" 'config: tag "xraywrt-api" uses reserved prefix xraywrt-'
 src_json '{"outbounds":[{"protocol":"freedom"}],"inbounds":[{"tag":"other","port":10085,"protocol":"http"}]}'
-gen_fails "$tmpdir/src.json" 'config: inbound "other" port 10085 collides with a router port'
+gen "$tmpdir/src.json"
+assert_eq 0 "$rc" "old API port is no longer reserved: $errtxt"
 src_json '{"outbounds":[{"tag":"xraywrt-api","protocol":"freedom"}]}'
 gen_fails "$tmpdir/src.json" 'config: tag "xraywrt-api" uses reserved prefix xraywrt-'
 pass 'router API ownership'

@@ -70,8 +70,7 @@ SRC_LIST_FILE="$LIST_DIR/always_proxy_src.txt"
 DIRECT_SRC_LIST_FILE="$LIST_DIR/direct_src.txt"
 
 # Router-owned Xray values, written into the generated runtime config.
-XRAY_API_HOST="127.0.0.1"
-XRAY_API_PORT="10085"
+XRAY_API_SOCKET="$PKG_STATE_DIR/api.sock"
 XRAY_API_TIMEOUT="3"
 # rmo/ado/adrules rebuild handlers and matchers (geodata) in the core.
 XRAY_API_APPLY_TIMEOUT="30"
