@@ -185,9 +185,7 @@ function override_count(a) {
 	return length(overridden);
 }
 
-function dns_raw_lost(a) {
-	return a.dns_raw_lost || (type(a.dns_outbounds) == 'array' && a.dns_raw_via && !(a.dns_raw_via in a.dns_outbounds) ? a.dns_raw_via : '');
-}
+
 
 function build(shape, a) {
 	switch (shape) {
@@ -229,7 +227,7 @@ function build(shape, a) {
 		route: {table: a.table, priority: a.priority}, errors: length(a.errors) ? [a.errors] : [],
 		profile: {name: opt(a.profile_name), selected: opt(a.profile_selected), pinned: a.profile_pinned == '1'},
 		core_source: (function(p) { return {source: opt(p[0]), channel: opt(p[1]), tag: opt(p[2]), version: opt(p[3])}; })(split(a.core_source ?? '', ':')),
-		warnings: filter(lines(a.warnings), (line) => !match(line, /\[E:dns_raw_lost\]$/) || !!dns_raw_lost(a)), fake_enabled: a.fake_enabled == '1', fake_domains: num(a.fake_domains ?? ''), direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0',
+		warnings: lines(a.warnings), fake_enabled: a.fake_enabled == '1', fake_domains: num(a.fake_domains ?? ''), direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0',
 		geodata: map(lines(a.geodata), (l) => {
 			let f = split(l, ' ');
 			return {file: f[0], asset: f[1] == '1', referenced: f[2] == '1', present: f[3] == '1', size: num(f[4]), mtime: num(f[5])};
@@ -242,15 +240,13 @@ function build(shape, a) {
 			for (let row in lines(a.provider)) { let p = split(row, ' '); compact_provider[p[0]] = p[1]; }
 			compact.mode = a.mode;
 			compact.provider = compact_provider;
-			compact.dns_outbounds = a.dns_outbounds ?? [];
-			compact.dns_raw_lost = dns_raw_lost(a);
 			compact.provider_lists = a.provider_lists == '1';
 		}
 		return compact;
 	case 'profile':
 		let provider = {};
 		for (let row in lines(a.provider)) { let p = split(row, ' '); provider[p[0]] = p[1]; }
-		return {mode: a.mode, mode_source: a.mode_source, fake_enabled: a.fake_enabled == '1', direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0', dns: a.dns, provider, overrides: override_count(a), targets: lines(a.targets), sniff_skipped_targets: lines(a.sniff_skipped_targets), dns_outbounds: a.dns_outbounds ?? [], dns_raw_lost: dns_raw_lost(a), reserved: lines(a.reserved), provider_lists: a.provider_lists == '1', provider_sources: a.preview_unavailable == '1' ? null : {vpn: provider_preview(a.vpn_preview), direct: provider_preview(a.direct_preview)}};
+		return {mode: a.mode, mode_source: a.mode_source, fake_enabled: a.fake_enabled == '1', direct_domains: num(a.direct_domains ?? ''), sniff: a.sniff ?? '0', dns: a.dns, provider, overrides: override_count(a), targets: lines(a.targets), sniff_skipped_targets: lines(a.sniff_skipped_targets), reserved: lines(a.reserved), provider_lists: a.provider_lists == '1', provider_sources: a.preview_unavailable == '1' ? null : {vpn: provider_preview(a.vpn_preview), direct: provider_preview(a.direct_preview)}};
 	case 'diagnostics': return {
 		conflicts: lines(a.conflicts), flash_free_kb: num(a.flash), tmp_xraywrt_kb: num(a.tmp_xraywrt),
 		ram_available_kb: num(a.ram), xray_rss_kb: num(a.rss),
@@ -463,14 +459,6 @@ try {
 			b.error = target;
 			emit(b);
 		} else die('Unknown balancer operation: ' + op);
-		break;
-	}
-	case 'dns-outbounds': {
-		let src = shift(ARGV), want = shift(ARGV) ?? '';
-		let gen = loadfile((getenv('XRAYWRT_LIB_DIR') ?? '/usr/lib/xraywrt') + '/xray-config.uc')();
-		let text = readfile(src);
-		if (text == null) die(gen.code_message('config_missing', 'config: cannot read %s', src));
-		print(encode(gen.dns_outbounds(text, want, {parse})), '\n');
 		break;
 	}
 	case 'profiles': {

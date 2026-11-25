@@ -248,8 +248,15 @@ install_packages() {
 core_compatible() {
 	local version="" comparison=""
 	version="$(pkg_version "$CORE_PKG")"
-	[ -n "$version" ] && comparison="$(apk version -t "$version" 0.26.5-r2)" || return 1
+	[ -n "$version" ] && comparison="$(apk version -t "$version" 0.27.1-r1)" || return 1
 	case "$comparison" in '=' | '>') return 0 ;; *) return 1 ;; esac
+}
+
+# Verify both features required by the app for manually installed cores.
+core_binary_compatible() {
+	"$CORE" run -test -c stdin: >/dev/null 2>&1 <<'EOF'
+{"api":{"tag":"api","listen":"/var/run/xraywrt/api.sock,0600","services":["HandlerService"]},"outbounds":[{"protocol":"dns","settings":{"rules":[{"action":"resolve"}]}}]}
+EOF
 }
 
 do_install() {
@@ -261,6 +268,9 @@ do_install() {
 		before="$(pkg_version "$PKG")"
 	fi
 	WORK="$(mktemp -d /tmp/xraywrt-install.XXXXXX)" || die "cannot create a temporary directory"
+	if [ -x "$CORE" ] && ! pkg_installed "$CORE_PKG" && ! core_binary_compatible; then
+		die "A compatible XrayWRT core 0.27.1 or newer is required; XrayWRT was not updated"
+	fi
 	# Keep the running service on the old app until its managed core can be updated.
 	if [ "$fresh" = 0 ] && pkg_installed "$CORE_PKG"; then
 		if [ -x "$XRAYWRT_BIN" ]; then
@@ -269,7 +279,7 @@ do_install() {
 				die "Xray core update failed; XrayWRT was not updated"
 			core_updated=1
 		fi
-		core_compatible || die "Xray core 0.26.5-r2 or newer is required; XrayWRT was not updated"
+		core_compatible || die "Xray core 0.27.1-r1 or newer is required; XrayWRT was not updated"
 	fi
 	install_packages "$lang"
 
@@ -292,7 +302,7 @@ do_install() {
 		}
 	fi
 	if pkg_installed "$CORE_PKG" && ! core_compatible; then
-		die "XrayWRT is installed, but Xray core 0.26.5-r2 or newer is required; the service was not enabled"
+		die "XrayWRT is installed, but Xray core 0.27.1-r1 or newer is required; the service was not enabled"
 	fi
 	log ""
 	if [ "$fresh" = 1 ]; then

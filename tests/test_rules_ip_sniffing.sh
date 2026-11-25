@@ -18,7 +18,7 @@ direct_ob='{"tag":"direct","protocol":"freedom"}'
 # The provider sniffs TLS and HTTP and sends the site of the test to direct.
 src_json "{\"outbounds\":[$direct_ob,$proxy_ob],\"routing\":{\"rules\":[{\"domain\":[\"domain:site.example\"],\"outboundTag\":\"direct\"}]},\"inbounds\":[{\"tag\":\"provider-in\",\"protocol\":\"tunnel\",\"listen\":\"127.0.0.1\",\"port\":12345,\"settings\":{\"followRedirect\":true,\"allowedNetwork\":\"tcp,udp\"},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}}]}"
 printf '%s\n' '203.0.113.0/24 proxy' >"$tmpdir/rules.txt"
-gen "$tmpdir/src.json" ".mode_override = true | .mode = \"direct-first\" | .wan_dns = [\"127.0.0.1\"] | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {}"
+gen "$tmpdir/src.json" ".mode_override = true | .mode = \"direct-first\" | .wan_dns = [\"127.0.0.1\"] | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {} | .dns_forward_other_types = 0 | .api_listen = \"$tmpdir/api.sock,0600\""
 assert_eq 0 "$rc" "generate: $errtxt"
 jq -e '[.routing.rules[] | select(.ruleTag == "xraywrt-rule-1")] | length == 1' <<<"$out" >/dev/null || fail "no ip rule in: $(jq -c .routing <<<"$out")"
 

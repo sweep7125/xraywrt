@@ -30,10 +30,7 @@ xray_params_json() {
 		--arg fakeip_range "$FAKEIP_RANGE" \
 		--argjson local_nets "$(printf '%s\n' $LOCAL_NETS_V4 $LOCAL_NETS_V6 | xraywrt-json lines)" \
 		--argjson wan_dns "$(dns_wan_servers | xraywrt-json lines)" \
-		--arg dns_raw_upstream "${DNS_RAW_UPSTREAM:-}" \
-		--arg dns_raw_via "${DNS_RAW_VIA:-}" \
-		--arg dns_raw_lost "${DNS_RAW_LOST:-}" \
-		--argjson dns_forward_other_types "${DNS_FORWARD_OTHER_TYPES:-0}" \
+		--argjson dns_forward_other_types "${DNS_FORWARD_OTHER_TYPES:-1}" \
 		--arg rules_file "$rules" \
 		--argjson rules_remote "$remote"
 }
@@ -116,83 +113,6 @@ xray_config_prepare() {
 	else
 		unset XRAY_RULE_REMOTE
 	fi
-}
-
-# Accepted runtimes only, under the caller's lock. Keep a UCI snapshot until publication succeeds.
-dns_forward_safety_save() {
-	local profile="$1" snapshot="$2" lost="" overrides="" option="" value="" added=0 newline='
-'
-
-	# A no-op must not leave an earlier transaction's enabling snapshot available to rollback.
-	rm -f "$snapshot" || {
-		err_code dns_raw_persist 'Cannot discard the previous DNS forwarding protection snapshot. The new configuration was not applied; free storage and try again.'
-		return 1
-	}
-	lost="$(sed -n 's/^dns-raw-lost //p' "$profile")" || {
-		err_code dns_raw_persist 'Cannot read DNS forwarding protection metadata. The new configuration was not applied; try again.'
-		return 1
-	}
-	[ -n "$lost" ] || return 0
-	overrides="$(uci_get provider_override)"
-	if [ "$(uci_get dns_raw_lost)" = "$lost" ] && [ -z "$(uci_get dns_raw_via)" ] && [ "$(uci_get dns_forward_other_types)" = 0 ]; then
-		case " $overrides " in *" dns_forward_other_types "*) return 0 ;; esac
-	fi
-	case " $overrides " in *" dns_forward_other_types "*) ;; *) added=1 ;; esac
-	if ! (umask 077; {
-		for option in dns_raw_lost dns_raw_via dns_forward_other_types; do
-			if value="$(uci -q get "$PKG_CONFIG.settings.$option" && printf '.')"; then
-				value="${value%.}"
-				case "$value" in *"$newline") value="${value%"$newline"}" ;; *) exit 1 ;; esac
-				[ "$value" = "$(printf '%s' "$value" | LC_ALL=C tr -d '\000-\037\177')" ] || exit 1
-				printf '1%s\n' "$value" || exit 1
-			else
-				printf '0\n' || exit 1
-			fi
-		done
-		printf '%s\n' "$added"
-	} >"$snapshot"); then
-		rm -f "$snapshot"
-		err_code dns_raw_persist 'Cannot save DNS forwarding protection. The new configuration was not applied; free storage and try again.'
-		return 1
-	fi
-	if uci_set dns_raw_lost "$lost" && uci_set dns_raw_via '' && uci_set dns_forward_other_types 0 &&
-		{ case " $overrides " in *" dns_forward_other_types "*) true ;; *) uci -q add_list "$PKG_CONFIG.settings.provider_override=dns_forward_other_types" ;; esac; } && uci_commit; then
-		return 0
-	fi
-	dns_forward_safety_restore "$snapshot" || :
-	err_code dns_raw_persist 'Cannot save DNS forwarding protection. The new configuration was not applied; free storage and try again.'
-	return 1
-}
-
-# A rejected publication must not disable a still-valid selection in the previous source.
-dns_forward_safety_restore() {
-	local snapshot="$1" option="" record="" value="" added="" ok=1
-
-	[ -f "$snapshot" ] || return 0
-	{
-		for option in dns_raw_lost dns_raw_via dns_forward_other_types; do
-			IFS= read -r record || { ok=0; break; }
-			case "$record" in
-				0) if uci -q get "$PKG_CONFIG.settings.$option" >/dev/null; then uci -q delete "$PKG_CONFIG.settings.$option" || ok=0; fi ;;
-				1*) value="${record#1}"; uci_set "$option" "$value" || ok=0 ;;
-				*) ok=0 ;;
-			esac
-		done
-		IFS= read -r added || ok=0
-		case "$added" in
-			1) uci -q del_list "$PKG_CONFIG.settings.provider_override=dns_forward_other_types" || ok=0 ;;
-			0) ;;
-			*) ok=0 ;;
-		esac
-	} <"$snapshot"
-	if [ "$ok" = 1 ] && uci_commit; then
-		rm -f "$snapshot"
-		return 0
-	fi
-	# If rollback cannot commit, discard its staged enabling values and retain the committed off latch.
-	uci -q revert "$PKG_CONFIG"
-	err_code dns_raw_persist 'Cannot restore DNS forwarding settings. Forwarding may remain off; free storage and review Advanced DNS.'
-	return 1
 }
 
 # Remember the inputs $RUNTIME_CONFIG was generated from, or forget them with

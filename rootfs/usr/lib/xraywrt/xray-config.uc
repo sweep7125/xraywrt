@@ -256,45 +256,6 @@ function check_reserved(cfg) {
 		for (let r in (type(cfg.reverse?.[k]) == 'array' ? cfg.reverse[k] : [])) check_tag(r?.tag);
 }
 
-// Transport outbounds only. Explicit freedom chains remain choices; their route is the provider's.
-function dns_outbound_tags(cfg) {
-	return uniq(map(filter(cfg.outbounds, (o) => type(o?.tag) == 'string' && o.tag != '' &&
-		substr(o.tag, 0, length(RESERVED)) != RESERVED && type(o.protocol) == 'string' && o.protocol != '' &&
-		!(o.protocol in ['blackhole', 'dns', 'loopback']) &&
-		(o.protocol != 'freedom' || !!o.streamSettings?.sockopt?.dialerProxy)), (o) => o.tag));
-}
-
-// Read the selected original source without generating it, so invalid saved DNS settings can be repaired.
-function dns_outbounds(text, want, api) {
-	let cfg = select_profile(load_source(text, api.parse), want, []);
-	check_identifiers(cfg);
-	return dns_outbound_tags(cfg);
-}
-
-// Spec 7.5: address for raw (non A/AAAA) queries: dns_raw_upstream
-// ("ip", "ip:port", "[ip6]:port") or, for direct forwarding only, the first WAN DNS; null = none.
-function raw_target(params, strict) {
-	if (strict && params.dns_raw_via && !params.dns_raw_upstream)
-		die(code_message('dns_raw_upstream_required', 'config: dns_raw_upstream is required with dns_raw_via; set an explicit DNS server IP address and optional port'));
-	let v = params.dns_raw_upstream || params.wan_dns?.[0];
-	if (!v) return null;
-	let m = match(v, /^\[([0-9A-Fa-f:.]+)\]:([0-9]+)$/) ?? match(v, /^([^:]+):([0-9]+)$/);
-	let ip = m ? m[1] : v, port = m ? +m[2] : 53;
-	if (type(v) != 'string' || !iptoarr(ip) || port < 1 || port > 65535) {
-		if (!strict) return null;
-		die(code_message('dns_raw_upstream_invalid', 'config: dns_raw_upstream must be an IP address with an optional port (1-65535)'));
-	}
-	return [ip, port];
-}
-
-// Raw forwarding only via dns_raw_via or, in direct-first, on request;
-// otherwise other types get an empty answer and never leave the router.
-function raw_forward(params) {
-	if (!params.dns_raw_via && !(params.mode == 'direct-first' && bool_of(params.dns_forward_other_types) == '1'))
-		return null;
-	return raw_target(params, true);
-}
-
 function with_mark(ob, mark) {
 	if (type(ob.streamSettings) != 'object') ob.streamSettings = {};
 	if (type(ob.streamSettings.sockopt) != 'object') ob.streamSettings.sockopt = {};
@@ -340,9 +301,7 @@ function apply_outbounds(cfg, params, profile) {
 	// whitelist domain resolving to one (DNS rebinding) reaches them here.
 	let nets = params.local_nets ?? [];
 	if (!length(nets)) die(code_message('config_invalid', 'config: %s', 'local_nets is empty'));
-	// A saved inactive server must not prevent disabling forwarding; invalid values grant no exemption.
-	let head = [{action: 'allow', port: '53'}], raw = params.dns_raw_upstream ? raw_target(params, false) : null;
-	if (raw) push(head, {action: 'allow', ip: [raw[0]]});
+	let head = [{action: 'allow', port: '53'}];
 	push(head, {action: 'block', ip: nets});
 	for (let i, ob in cfg.outbounds) {
 		if (ob.protocol != 'freedom' || ob.streamSettings.sockopt.dialerProxy) continue;
@@ -396,11 +355,7 @@ function router_inbounds(params, fake, sniffing) {
 	// nft sends only the IPv4 fake pool of direct devices here (spec 6.3, 7.2).
 	if (fake)
 		push(list, tproxy_inbound('xraywrt-fakeip-direct', '127.0.0.1', p.direct, {enabled: true, destOverride: ['fakedns'], routeOnly: true}));
-	let dns = {allowedNetwork: 'tcp,udp'}, raw = raw_forward(params);
-	if (raw) {
-		dns.rewriteAddress = raw[0];
-		dns.rewritePort = raw[1];
-	}
+	let dns = {allowedNetwork: 'tcp,udp'};
 	push(list, {tag: 'xraywrt-dns-in', protocol: 'tunnel', listen: '127.0.0.1', port: p.dns, settings: dns});
 	return list;
 }
@@ -1028,31 +983,15 @@ function router_fakedns(cfg, params, own, profile) {
 	return fake;
 }
 
-// Spec 7.5: A/AAAA go to the internal DNS, everything else is answered
-// empty or sent raw to the inbound's rewriteAddress.
-function dns_outbound(cfg, params, profile) {
+// The core selects DNS servers and applies FakeDNS policy.
+function dns_outbound(cfg, params) {
 	let ob = filter(cfg.outbounds, (o) => o.tag == 'xraywrt-dns')[0], rules = [];
-	push(rules, {qType: '1,28', action: 'hijack'});
-	let domains = [], seen = {};
-	for (let s in cfg.dns.servers)
-		if (is_fakedns(s) && type(s.domains) == 'array')
-			for (let d in s.domains) if (!seen[d]) { seen[d] = true; push(domains, d); }
-	let via = params.dns_raw_via;
-	// Recorded even while WAN DNS is still empty at boot, so net_refresh rebuilds once it arrives.
-	if (!via && !params.dns_raw_upstream && params.mode == 'direct-first' && bool_of(params.dns_forward_other_types) == '1' && !('uses-wan-dns' in profile))
-		profile_record(profile, 'uses-wan-dns');
-	if (!raw_forward(params)) {
-		push(rules, {action: 'return'});
-	} else {
-		if (length(domains)) push(rules, {domain: domains, action: 'return'});
-		// A fakedns server without domains covers every name: HTTPS/SVCB
-		// records would hand clients real addresses past the fake-IP range.
-		if (bool_of(params.block_https_svcb) == '1' || length(filter(cfg.dns.servers, (s) => is_fakedns(s) && (type(s.domains) != 'array' || !length(s.domains)))))
+	if (bool_of(params.dns_forward_other_types ?? 1) == '1') {
+		if (bool_of(params.block_https_svcb) == '1')
 			push(rules, {qType: '65,64', action: 'return'});
-		if (via) {
-			ob.streamSettings.sockopt.dialerProxy = via;
-		}
-		push(rules, {action: 'direct'});
+		push(rules, {action: 'resolve'});
+	} else {
+		push(rules, {qType: '1,28', action: 'hijack'});
 	}
 	ob.settings = {rules};
 }
@@ -1203,14 +1142,6 @@ function generate(text, params, api) {
 			if (b?.strategy?.type in ['leastPing', 'leastLoad'] && type(b.tag) == 'string' && b.tag != '')
 				profile_record(profile, 'observe-balancer', b.tag);
 	check_reserved(cfg);
-	// Preview only: accepted-runtime callers persist this decision under the runtime lock.
-	let lost = params.dns_raw_lost || (params.dns_raw_via && !(params.dns_raw_via in dns_outbound_tags(cfg)) ? params.dns_raw_via : '');
-	if (lost) {
-		profile_record(profile, 'dns-raw-lost', lost);
-		warn_code(profile, 'dns_raw_lost', 'Forwarding of other DNS query types was turned off because its outbound became unavailable. Choose an outbound in Advanced DNS to re-enable it, or leave forwarding off.');
-		params.dns_raw_via = '';
-		params.dns_forward_other_types = 0;
-	}
 	cfg = apply_ownership(cfg, params, profile);
 	let hosts = server_hosts(cfg);
 	for (let h in hosts) profile_record(profile, 'server-host', h);
@@ -1231,7 +1162,7 @@ function generate(text, params, api) {
 	push(cfg.inbounds, ...router_inbounds(params, fake, sniffing));
 	cfg.api = router_api(params);
 	router_rules(cfg, params, fake, direct_ips, own.rules, tags.block_tag, tags.direct_tag);
-	dns_outbound(cfg, params, profile);
+	dns_outbound(cfg, params);
 	if (type(cfg.geodata) == 'object') geodata_provider_cron(cfg, params, profile);
 	geodata_user_assets(cfg, params, profile);
 	geodata_refs(cfg, profile);
@@ -1291,4 +1222,4 @@ function outbound_delta(old, next) {
 	};
 }
 
-return { generate, profiles, dns_outbounds, diff_sections, outbound_delta, code_message, geodata_files, rule_targets, check_rules, rule_addresses, rule_urls, rule_routed_urls, rule_packet_addresses };
+return { generate, profiles, diff_sections, outbound_delta, code_message, geodata_files, rule_targets, check_rules, rule_addresses, rule_urls, rule_routed_urls, rule_packet_addresses };

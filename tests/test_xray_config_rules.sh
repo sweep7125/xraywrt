@@ -17,22 +17,25 @@ direct_ob='{"tag":"direct","protocol":"freedom"}'
 # gen_rules <mode> <rules text> [extra jq filter]
 gen_rules() {
 	printf '%s\n' "$2" >"$tmpdir/rules.txt"
-	gen "$tmpdir/src.json" ".mode_override = true | .mode = \"$1\" | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {} ${3:+| $3}"
+	gen "$tmpdir/src.json" ".mode_override = true | .mode = \"$1\" | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {} | .dns_forward_other_types = 0 ${3:+| $3}"
 	assert_eq 0 "$rc" "$1: generate: $errtxt"
 }
 own_rules() { jq -c '[.routing.rules[] | select((.ruleTag // "") | startswith("xraywrt-rule-")) | select((.ruleTag | endswith("-service")) | not) | if .inboundTag == ["xraywrt-tproxy4","xraywrt-tproxy6"] and (.port == null and .network == null) then del(.inboundTag) else . end]' <<<"$out"; }
 dns_servers() { jq -c .dns.servers <<<"$out"; }
 core_test() {
-	xray-test run -test -c "$tmpdir/out.json" >"$tmpdir/core.log" 2>&1 || fail "$1: core test: $(cat "$tmpdir/core.log")"
+	jq '(.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules[] | select(.action == "resolve") | .action) = "return"' "$tmpdir/out.json" >"$tmpdir/go-config.json"
+	xray-test run -test -c "$tmpdir/go-config.json" >"$tmpdir/core.log" 2>&1 || fail "$1: core test: $(cat "$tmpdir/core.log")"
 }
 # Send both transports to the same original address and port on the real core.
 selector_routes() (
 	local core="" port=18948
 	trap '[ -z "$core" ] || { kill "$core" 2>/dev/null || :; wait "$core" 2>/dev/null || :; }' EXIT
-	jq --arg log "$tmpdir/access.log" --argjson port "$port" '
+	jq --arg log "$tmpdir/access.log" --arg api "$tmpdir/api.sock,0600" --argjson port "$port" '
+         (.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules[] | select(.action == "resolve") | .action) = "return" |
 	 .routing.rules += [{ip:["198.20.22.2"],port:443,network:"tcp,udp",outboundTag:"second"}]
 	 | (.outbounds[] | select(.protocol == "socks") | .settings.servers) = [{address:"127.0.0.1",port:1}]
 	 | .inbounds = [{tag:"xraywrt-tproxy4",listen:"127.0.0.1",port:$port,protocol:"tunnel",settings:{address:"198.20.22.2",port:443,allowedNetwork:"tcp,udp"}}]
+	 | .api.listen = $api
 	 | .log = {access:$log,loglevel:"warning"}' <<<"$out" >"$tmpdir/selector-runtime.json"
 	: >"$tmpdir/access.log"
 	"$XRAY_TEST_BIN" run -c "$tmpdir/selector-runtime.json" >"$tmpdir/selector-core.log" 2>&1 &

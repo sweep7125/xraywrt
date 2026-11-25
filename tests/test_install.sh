@@ -309,7 +309,8 @@ pass "core error shown"
  sed -e '/^main "\$@"$/d' -e "s|/etc/init.d/xraywrt|$tmpdir/init-xraywrt|g" "$ROOT_DIR/install.sh" >"$tmpdir/install-success.sh"
  source "$tmpdir/install-success.sh"
  CORE="$tmpdir/existing-core"
- touch "$CORE"
+ printf '#!/bin/sh\n[ "$*" = "run -test -c stdin:" ] || exit 1\ngrep -q "api.sock,0600.*resolve"\n' >"$CORE"
+ apk() { echo "="; }
  chmod +x "$CORE"
  printf '#!/bin/sh\necho "$*" >>"%s"\n' "$tmpdir/init.calls" >"$tmpdir/init-xraywrt"
  chmod +x "$tmpdir/init-xraywrt"
@@ -381,12 +382,12 @@ pass "no core asset: instruction, package kept, service disabled"
  chmod +x "$tmpdir/init-xraywrt"
  resolve_language() { echo en; }
  install_packages() { :; }
- pkg_version() { echo 0.26.5-r2; }
+ pkg_version() { echo 0.27.1-r1; }
  apk() { echo '='; }
  for case in missing core channel; do
   rm -f "$tmpdir/core.calls" "$tmpdir/core-core"
   CORE="$tmpdir/core-core"
-  [ "$case" = missing ] || { touch "$CORE"; chmod +x "$CORE"; }
+  [ "$case" = missing ] || { printf '#!/bin/sh\n[ "$*" = "run -test -c stdin:" ] || exit 1\ngrep -q "api.sock,0600.*resolve"\n' >"$CORE"; chmod +x "$CORE"; }
   pkg_installed() { [ "$1" = xraywrt-core ] && [ "$case" = core ]; }
   do_install >/dev/null 2>&1 || fail "install with $case core"
   if [ "$case" = channel ]; then
@@ -409,21 +410,21 @@ pass "core package installed and updated through core-update"
  chmod +x "$CORE" "$XRAYWRT_BIN" "$tmpdir/init-xraywrt"
  resolve_language() { echo en; }
  pkg_installed() { [ "$1" = "$CORE_PKG" ]; }
- pkg_version() { echo 0.26.5-r1; }
+ pkg_version() { echo 0.26.5-r2; }
  apk() { echo '<'; }
  install_packages() { echo app >>"$tmpdir/fresh-old.calls"; }
  : >"$tmpdir/fresh-old.calls"
  out="$(do_install 2>&1)" && fail "fresh install with old managed core must fail"
  assert_eq $'app\ncore-update' "$(cat "$tmpdir/fresh-old.calls")" "old core leaves fresh app installed and service disabled"
- [[ "$out" == *"XrayWRT is installed, but Xray core 0.26.5-r2 or newer is required; the service was not enabled"* ]] || fail "partial install message: $out"
+ [[ "$out" == *"XrayWRT is installed, but Xray core 0.27.1-r1 or newer is required; the service was not enabled"* ]] || fail "partial install message: $out"
 )
 pass "fresh install rejects old managed core before enabling service"
 
 (
  resolve_language() { echo en; }
  pkg_installed() { return 0; }
- pkg_version() { if [ "$1" = "$CORE_PKG" ]; then echo "${core_version_case:-0.26.5-r2}"; else echo 0.1.6-r1; fi; }
- apk() { [ "$*" = 'version -t 0.26.5-r2 0.26.5-r2' ] && echo '=' || echo '<'; }
+ pkg_version() { if [ "$1" = "$CORE_PKG" ]; then echo "${core_version_case:-0.27.1-r1}"; else echo 0.1.6-r1; fi; }
+ apk() { [ "$*" = 'version -t 0.27.1-r1 0.27.1-r1' ] && echo '=' || echo '<'; }
  install_packages() { echo app >>"$tmpdir/upgrade-order"; }
  XRAYWRT_BIN="$tmpdir/upgrade-core"
  CORE="$tmpdir/upgrade-xray"
@@ -433,10 +434,10 @@ pass "fresh install rejects old managed core before enabling service"
  do_install >/dev/null
  assert_eq $'core-update\napp' "$(cat "$tmpdir/upgrade-order")" "update compatible managed core before replacing the app"
  : >"$tmpdir/upgrade-order"
- if (core_version_case=0.26.5-r1 do_install >/dev/null 2>&1); then fail "old managed package must abort"; fi
+ if (core_version_case=0.26.5-r2 do_install >/dev/null 2>&1); then fail "old managed package must abort"; fi
  assert_eq core-update "$(cat "$tmpdir/upgrade-order")" "successful update with old package keeps the old app"
  : >"$tmpdir/upgrade-order"
- if (XRAYWRT_BIN="$tmpdir/missing-cli" core_version_case=0.26.5-r1 do_install >/dev/null 2>&1); then fail "old managed package without CLI must abort"; fi
+ if (XRAYWRT_BIN="$tmpdir/missing-cli" core_version_case=0.26.5-r2 do_install >/dev/null 2>&1); then fail "old managed package without CLI must abort"; fi
  [[ ! -s "$tmpdir/upgrade-order" ]] || fail "missing CLI with old core keeps the old app"
  : >"$tmpdir/upgrade-order"
  printf 'exit 1\n' >>"$XRAYWRT_BIN"
@@ -444,6 +445,23 @@ pass "fresh install rejects old managed core before enabling service"
  assert_eq core-update "$(cat "$tmpdir/upgrade-order")" "failed core update keeps the old app"
 )
 pass "upgrade updates managed core before the app"
+
+(
+ resolve_language() { echo en; }
+ pkg_installed() { [ "$1" = "$PKG" ]; }
+ pkg_version() { echo 0.1.9-r1; }
+ install_packages() { echo app >>"$tmpdir/manual-order"; }
+ CORE="$tmpdir/manual-core"
+ : >"$tmpdir/manual-order"
+ printf '#!/bin/sh\nexit 1\n' >"$CORE"
+ chmod +x "$CORE"
+ if (do_install >/dev/null 2>&1); then fail 'incompatible manual core must abort'; fi
+ [[ ! -s "$tmpdir/manual-order" ]] || fail 'incompatible manual core must not replace app'
+ printf '#!/bin/sh\n[ "$*" = "run -test -c stdin:" ] || exit 1\ngrep -q "api.sock,0600.*resolve"\n' >"$CORE"
+ do_install >/dev/null || fail 'compatible manual core accepted'
+ assert_eq app "$(cat "$tmpdir/manual-order")" 'compatible manual core keeps normal install'
+)
+pass 'manual core checked before app install'
 
 # release_version reads the versioned apk line whose hash equals the fixed-name asset.
 (

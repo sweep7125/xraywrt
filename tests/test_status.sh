@@ -132,7 +132,7 @@ printf 'profile-schema 1\nfake-enabled 0\nmode proxy-first\ndns redir-host\nset 
 fake_uci_set xraywrt.settings.provider_override disable_quic
 profile_json | jq -e '.provider.disable_quic == "0" and .overrides == 1 and .targets == [] and .reserved == [] and .provider_lists == true' >/dev/null || fail "profile-json contract"
 (
- settings_load() { POLICY_MODE=proxy-first; DNS_RAW_LOST=''; DNS_RAW_VIA=''; SUBSCRIPTION_URL='https://secret.example/key'; PROFILE_NAME=''; }
+ settings_load() { POLICY_MODE=proxy-first; SUBSCRIPTION_URL='https://secret.example/key'; PROFILE_NAME=''; }
  settings_provider_entries() { printf 'disable_quic 0\n'; }
  settings_uci_get() { printf '0\n'; }
  status_netbird_present() { return 0; }
@@ -179,18 +179,6 @@ status_json | jq -e '.sniff == "tls" and .direct_domains == 2' >/dev/null || fai
 # The targets of My rules are what the generator recorded; reserved tags are named apart.
 printf 'rules-target proxy\nrules-target pool\nrules-reserved direct\n' >>"$PROFILE_FILE"
 profile_json | jq -e '.targets == ["proxy","pool"] and .reserved == ["direct"] and (has("lists") | not)' >/dev/null || fail 'profile targets and reserved tags'
-cp "$ROOT_DIR/tests/fixtures/xray/src/single.json" "$XRAY_CONFIG"
-profile_json | jq -e '.dns_outbounds == ["proxy"]' >/dev/null || fail 'profile separates DNS outbounds from My rules balancers'
-fake_uci_set xraywrt.settings.dns_raw_via proxy
-profile_json | jq -e '.dns_outbounds == ["proxy"]' >/dev/null || fail 'catalog survives via with missing upstream'
-rm -f "$PROFILE_FILE"
-profile_json | jq -e '.dns_outbounds == ["proxy"]' >/dev/null || fail 'repair catalog does not need a successful cached profile'
-jq -s '[.[0] + {remarks:"first"}, .[0] + {remarks:"chosen",outbounds:[{protocol:"socks",tag:"chosen tag"}]}]' "$XRAY_CONFIG" >"$tmpdir/array.json"
-cp "$tmpdir/array.json" "$XRAY_CONFIG"
-fake_uci_set xraywrt.settings.profile chosen
-profile_json | jq -e '.dns_outbounds == ["chosen tag"]' >/dev/null || fail 'profile selection updates DNS catalog without cached profile refresh'
-uci delete xraywrt.settings.profile
-uci delete xraywrt.settings.dns_raw_via
 pass "status check state, core not called and profile-json"
 
 printf 'profile-schema 1\nfake-enabled 0\nmode proxy-first\ndns redir-host\nset block_client_ipv6 1\n' >"$PROFILE_FILE"

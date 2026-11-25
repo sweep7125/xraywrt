@@ -72,13 +72,12 @@ if [ "${XRAY_TEST_CORE:-}" = installed ]; then
   echo "[smoke] Using the installed core (XRAY_TEST_CORE=installed)..."
   VM "/usr/bin/xraywrt core-version-json" | tee "${LOG_DIR}/core-version.json" | grep -q '"installed":true' || fail "no installed core"
 else
-  CORE_APK="${DIST_DIR}/xraywrt-core_0.26.5-r2_x86_64.apk"
-  [ -f "$CORE_APK" ] || fail "build the XrayWRT core 0.26.5-r2 x86_64 VM package first"
-  echo "[smoke] Installing XrayWRT core 0.26.5-r2 VM package..."
+  CORE_APK="${DIST_DIR}/xraywrt-core_0.27.1-r1_x86_64.apk"
+  [ -f "$CORE_APK" ] || fail "build the XrayWRT core 0.27.1-r1 x86_64 VM package first"
+  echo "[smoke] Installing XrayWRT core 0.27.1-r1 VM package..."
   VM "cat > /tmp/core.apk" <"$CORE_APK"
   VM "apk add --allow-untrusted /tmp/core.apk" | tee "${LOG_DIR}/core-install.log"
-  VM "/opt/xraywrt/bin/xray version | sed -n 1p" | grep -Eq ' [a-z]+-0\.26\.5 ' || fail "core is not XrayWRT core 0.26.5"
-
+  VM "apk info -e 'xraywrt-core=0.27.1-r1' >/dev/null" || fail "core package version is not 0.27.1-r1"
 fi
 
 echo "[smoke] Deploying minimal provider config (direct only, WAN DNS)..."

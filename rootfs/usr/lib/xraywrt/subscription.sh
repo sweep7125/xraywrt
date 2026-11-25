@@ -439,7 +439,7 @@ subscription_due() {
 # Per subscription: the options below (option:default), the lists in
 # SUBSCRIPTION_SETTING_LISTS and the policy list files. The active subscription
 # keeps them in settings and in LIST_DIR; a parked one in its section and its directory.
-SUBSCRIPTION_SETTINGS="mode:proxy-first discord_voice:0 disable_quic:0 dns_hijack:0 bypass_ntp:0 bypass_subscription_dns:0 block_client_ipv6:0 dns_forward_other_types:0 block_https_svcb:0 lists_interval:0 core_log_level:warning dns_raw_upstream: dns_raw_via: dns_raw_lost:"
+SUBSCRIPTION_SETTINGS="mode:proxy-first discord_voice:0 disable_quic:0 dns_hijack:0 bypass_ntp:0 bypass_subscription_dns:0 block_client_ipv6:0 dns_forward_other_types:1 block_https_svcb:0 lists_interval:0 core_log_level:warning"
 SUBSCRIPTION_SETTING_LISTS="provider_override balancer_override"
 SUBSCRIPTION_LISTS="rules src direct_src"
 

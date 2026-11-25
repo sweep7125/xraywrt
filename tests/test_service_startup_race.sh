@@ -5,7 +5,7 @@ tmpdir="$(make_temp_dir)"
 trap 'rm -rf "$tmpdir"' EXIT
 setup_fake_uci "$tmpdir"
 export RECOVERY_TEST_DIR="$tmpdir" RECOVERY_ROOT="$ROOT_DIR" PROBE="${PROBE:-startup}"
-cases=(startup startup-via early reject)
+cases=(startup early reject)
 [ $# -eq 0 ] || cases=("$@")
 for PROBE in "${cases[@]}"; do
 export PROBE
@@ -23,7 +23,7 @@ XRAY_CONFIG="$RECOVERY_LIVE/source"; RUNTIME_CONFIG="$PKG_TMP_DIR/config.json"; 
 XRAY_BIN="$RECOVERY_LIVE/core"; SUPERVISOR_CMD="$RECOVERY_LIVE/cli run-service"
 RUNTIME_LOCK_TIMEOUT=15; WATCHDOG_INTERVAL=0.05; WATCHDOG_FAILS=1; CORE_READY_WAIT=3
 core_version() { echo test; }
-settings_load() { DNS_RAW_VIA=''; [ "$PROBE" != startup-via ] || DNS_RAW_VIA=proxy; }; cron_update() { :; }
+settings_load() { :; }; cron_update() { :; }
 service_running() { local core_pid; core_pid="$(cat "$SERVICE_PID_FILE" 2>/dev/null)" || return 1; [ -n "$core_pid" ] && kill -0 "$core_pid" 2>/dev/null; }
 xray_config_key() { if [ "$PROBE" = early ]; then uci_get core_log_level | sha256sum | cut -d' ' -f1; else sha256sum "$XRAY_CONFIG" | cut -d' ' -f1; fi; }
 xray_config_generate() { echo gen >>"$RECOVERY_LIVE/generations"; if [ "$PROBE" = early ]; then uci_get core_log_level >"$2"; else cp "$1" "$2"; fi; echo profile >"$2.profile"; }

@@ -37,7 +37,7 @@ assert_eq '0:0:0:0:0' "$(uci_get dns_hijack):$(uci_get disable_quic):$(uci_get n
 assert_eq 0 "$(uci_get lists_interval)" 'lists_interval empty becomes 0'
 assert_eq warning "$(uci_get core_log_level)" 'core_log_level empty becomes warning'
 assert_eq '0 5 * * *' "$(uci_get geodata_cron)" 'geodata_cron empty filled'
-assert_eq '0:proxy-first:0' "$(uci_get dns_forward_other_types):$(uci_get mode):$(uci_get block_https_svcb)" 'new options filled'
+assert_eq '1:proxy-first:0' "$(uci_get dns_forward_other_types):$(uci_get mode):$(uci_get block_https_svcb)" 'new options filled'
 assert_eq '' "$(uci_get dns_raw_upstream)" 'DNS options stay empty: no public resolvers'
 assert_eq commit "$(cat "$tmpdir/commit.calls")" 'migrate commits retained defaults'
 assert_eq generated "$(cat "$tmpdir/generated.calls")" 'migrate ensures generated settings'
@@ -94,17 +94,34 @@ assert_false 'core_auto_update removed (spec 13)' uci -q get xraywrt.settings.co
 assert_false 'no MihoWRT clean-up in the migration' grep -E 'mihomo_log_level|dashboard|runtime\.lock' "$ROOT_DIR/rootfs/usr/lib/xraywrt/migration.sh"
 pass 'core_auto_update removed'
 
-# Spec 7.5: refusing other DNS types is gone; forwarding is opt-in.
+# Spec 7.5: forwarding defaults on and an explicit off remains off.
 fake_uci_set xraywrt.settings.dns_refuse_other_types 1
 fake_uci_set xraywrt.settings.dns_block_https_rr 1
 migrate
 assert_false 'dns_refuse_other_types removed' uci -q get xraywrt.settings.dns_refuse_other_types
 assert_false 'dns_block_https_rr removed' uci -q get xraywrt.settings.dns_block_https_rr
-assert_eq 0 "$(uci_get dns_forward_other_types)" 'dns_forward_other_types stays off'
+assert_eq 1 "$(uci_get dns_forward_other_types)" 'dns_forward_other_types defaults on'
 assert_eq 1 "$(uci_get block_https_svcb)" 'retired option does not overwrite existing opt-in'
 uci -q delete xraywrt.settings.block_https_svcb
 migrate
 assert_eq 0 "$(uci_get block_https_svcb)" 'retired option does not enable new opt-in'
+fake_uci_set xraywrt.settings.dns_raw_lost old-route
+fake_uci_set xraywrt.settings.dns_raw_upstream ''
+fake_uci_set xraywrt.settings.dns_raw_via old
+fake_uci_set xraywrt.settings.dns_forward_other_types 0
+fake_uci_set xraywrt.settings.provider_override dns_forward_other_types
+migrate
+assert_eq 0 "$(uci_get dns_forward_other_types)" 'old safety latch and explicit override remain off'
+assert_false 'empty raw upstream removed' uci -q get xraywrt.settings.dns_raw_upstream
+assert_false 'raw via removed' uci -q get xraywrt.settings.dns_raw_via
+assert_false 'raw lost removed' uci -q get xraywrt.settings.dns_raw_lost
+uci -q delete xraywrt.settings.provider_override
+uci -q delete xraywrt.settings.dns_raw_lost
+migrate
+assert_eq 0 "$(uci_get dns_forward_other_types)" 'existing off without override is preserved'
+uci -q delete xraywrt.settings.dns_forward_other_types
+migrate
+assert_eq 1 "$(uci_get dns_forward_other_types)" 'missing forwarding defaults on'
 pass 'dns_refuse_other_types removed'
 
 # B3 / spec 16: empty list needs no placeholder; existing overrides survive upgrades.
@@ -170,9 +187,15 @@ printf '3.3.3.3\n' >"$XRAY_SUBS_DIR/s1/lists/dst.txt"
 printf 'old.example\n' >"$XRAY_SUBS_DIR/s1/lists/direct-domains.txt"
 printf 'kept.example core\n' >"$XRAY_SUBS_DIR/s1/lists/rules.txt"
 uci -q set xraywrt.s1=subscription
+uci -q set xraywrt.s1.dns_forward_other_types=0
+uci -q set xraywrt.s1.dns_raw_via=old
+uci -q set xraywrt.settings.sub_s1_dns_raw_upstream=old
 uci -q set xraywrt.s1.dst_list_source=own
 subscription_ids() { echo s1; }
 migrate
+assert_eq 0 "$(uci -q get xraywrt.s1.dns_forward_other_types)" 'parked explicit off survives'
+assert_false 'parked raw setting removed' uci -q get xraywrt.s1.dns_raw_via
+assert_false 'legacy parked raw setting removed' uci -q get xraywrt.settings.sub_s1_dns_raw_upstream
 assert_eq 0 "$(uci -q get xraywrt.s1.block_https_svcb)" 'parked subscription gets disabled opt-in'
 uci -q set xraywrt.s1.block_https_svcb=1
 migrate

@@ -73,27 +73,6 @@ settings_require
 assert_eq 0 "$LISTS_INTERVAL" "require loads when guard is absent"
 pass "settings normalized and lazy loaded without suppressing refresh"
 
-# The lost-outbound latch belongs to UCI, never an inherited or stale value.
-for saved in '' 'VPN 🇷🇺 = primary'; do
- fake_uci_reset
- [ -z "$saved" ] || fake_uci_set xraywrt.settings.dns_raw_lost "$saved"
- DNS_RAW_LOST=hostile ash -eu -c '
-  for module in constants helpers validate settings xray-config; do
-   . "$XRAYWRT_LIB_DIR/$module.sh"
-  done
-  PROFILE_FILE="$1/profile"
-  XRAY_CONFIG="$1/source.json"
-  PROVIDER_OVERRIDES=""
-  settings_generator_load
-  [ "$DNS_RAW_LOST" = "$2" ]
-  DNS_RAW_LOST=stale
-  settings_load
-  [ "$DNS_RAW_LOST" = "$2" ]
- ' ash "$tmpdir" "$saved" || fail 'DNS_RAW_LOST must be initialized from UCI'
-done
-fake_uci_reset
-pass 'generator and settings loads replace inherited and stale DNS_RAW_LOST from UCI'
-
 settings_load || fail "empty UCI must load"
 assert_eq "proxy-first" "$POLICY_MODE" "default policy mode"
 assert_eq redir-host "$DNS_MODE" "no config defaults to redir-host"
@@ -103,7 +82,7 @@ assert_eq "0:0" "$SUBSCRIPTION_INTERVAL:$LISTS_INTERVAL" "default intervals (no 
 assert_eq "113920" "$NETBIRD_MARK" "default NetBird mark"
 assert_eq 0 "$DIRECT_LISTENER" "no config has no direct listener"
 assert_eq warning "$CORE_LOG_LEVEL" "default Xray log level"
-assert_eq 'proxy-first:0:0::0' "$UCI_MODE:$MODE_OVERRIDE:$DNS_FORWARD_OVERRIDE:$PROFILE_NAME:$DNS_FORWARD_OTHER_TYPES" "default generator inputs"
+assert_eq 'proxy-first:0:0::1' "$UCI_MODE:$MODE_OVERRIDE:$DNS_FORWARD_OVERRIDE:$PROFILE_NAME:$DNS_FORWARD_OTHER_TYPES" "default generator inputs"
 assert_eq '0 5 * * *' "$GEODATA_CRON" 'default geodata cron'
 assert_eq '[]' "$GEODATA_ASSETS_JSON" 'default user geodata list'
 fake_uci_set xraywrt.settings.geodata_asset 'own.dat=https://own.example/a?x=y'
@@ -143,20 +122,6 @@ expect_invalid netbird_mark 0x1BD01
 expect_invalid lists_interval abc
 expect_invalid core_log_level trace
 expect_invalid mode auto
-expect_invalid dns_raw_upstream 'dns.example'
-expect_invalid dns_raw_via $'proxy\tx'
-(
- # Multi-line values cannot be represented by the line-based fake UCI database.
- settings_uci_get() { if [ "$1" = dns_raw_via ]; then printf 'proxy\nx'; else printf '%s' "${2:-}"; fi; }
- settings_generator_load 2>/dev/null && fail 'newline in outbound tag must be rejected'
- :
-)
-for tag in 'proxy;x' 'VPN 🇷🇺 = primary' 'a b'; do
- fake_uci_reset
- fake_uci_set xraywrt.settings.dns_raw_via "$tag"
- settings_generator_load
- assert_eq "$tag" "$DNS_RAW_VIA" 'preserve source tag characters'
-done
 fake_uci_reset
 set_active_subscription 'ftp://x'
 settings_load 2>/dev/null && fail 'the active subscription link must be http(s)'
@@ -316,7 +281,7 @@ assert_false 'shipped config has no core_auto_update' grep -q core_auto_update "
 pass 'no core_auto_update setting'
 
 # Spec 13: shipped UCI defaults.
-for opt in "mode 'proxy-first'" "dns_forward_other_types '0'" "core_log_level 'warning'"; do
+for opt in "mode 'proxy-first'" "dns_forward_other_types '1'" "core_log_level 'warning'"; do
 	assert_file_contains "$ROOT_DIR/rootfs/etc/config/xraywrt" "option $opt" "default $opt"
 done
 assert_false 'the old list source options are gone' grep -E '_list_source|fake_domains_source' "$ROOT_DIR/rootfs/etc/config/xraywrt"

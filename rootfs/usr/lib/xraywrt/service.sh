@@ -151,11 +151,6 @@ runtime_config_build() {
 	geodata_prune "$1.profile"
 	if { key="$(xray_config_test_key "$1")" && [ "$key" = "$(cat "$CONFIG_TESTED_FILE" 2>/dev/null)" ]; } ||
 		xray_config_test "$1" "$XRAY_BIN" "$key"; then
-		if ! dns_forward_safety_save "$1.profile" "$1.dns-uci"; then
-			rm -f "$1" "$1.profile"
-			return 1
-		fi
-		rm -f "$1.dns-uci"
 		config_check_record ok
 		runtime_config_key_store "$inputs"
 		return 0
@@ -257,7 +252,7 @@ stop_child() {
 core_spawn() {
 	pid=""
 	chmod 700 "$PKG_STATE_DIR" || return 1
-	# Ferrum leaves the socket after SIGKILL. Its lock is released by the kernel.
+	# The core leaves the socket after SIGKILL. Its lock is released by the kernel.
 	if [ -S "$XRAY_API_SOCKET" ]; then
 		flock -n "$XRAY_API_SOCKET.lock" rm -f "$XRAY_API_SOCKET" || return 1
 	fi
@@ -295,7 +290,7 @@ core_restart() {
 # the runtime config after API apply, or restart for unsupported changes/errors.
 # A failed restart restores the previous runtime (spec 9.3 step 4).
 runtime_publish() {
-	local candidate="$1" file="" running=0 hot=0 attempted=0 snapshot="$RUNTIME_CONFIG.geodata.next" safety="$1.dns-uci"
+	local candidate="$1" file="" running=0 hot=0 attempted=0 snapshot="$RUNTIME_CONFIG.geodata.next"
 
 	RUNTIME_RESTARTED=0 RUNTIME_HOT_RELOADED=0
 	service_running && [ -f "$SUPERVISOR_PID_FILE" ] && running=1
@@ -312,10 +307,6 @@ runtime_publish() {
 		}
 	done
 	runtime_config_key_store ""
-	if ! dns_forward_safety_save "$candidate.profile" "$safety"; then
-		rm -f "$RUNTIME_CONFIG.prev" "$PROFILE_FILE.prev"
-		return 1
-	fi
 	if [ "$running" -eq 1 ] && geodata_unchanged &&
 		[ "$(xraywrt-json diff "$RUNTIME_CONFIG" "$candidate" 2>/dev/null)" = hot ] && geodata_snapshot "$snapshot"; then
 		attempted=1
@@ -323,7 +314,6 @@ runtime_publish() {
 	fi
 	if ! { mv -f "$candidate.profile" "$PROFILE_FILE" && mv -f "$candidate" "$RUNTIME_CONFIG"; }; then
 		runtime_restore_prev
-		dns_forward_safety_restore "$safety" || :
 		# The core's state after partial API work is unknown: without a snapshot
 		# every change restarts until the next core_spawn records one.
 		[ "$attempted" -eq 0 ] || core_restart || {
@@ -344,7 +334,6 @@ runtime_publish() {
 	elif [ "$running" -eq 1 ]; then
 		if ! core_restart; then
 			runtime_restore_prev
-			dns_forward_safety_restore "$safety" || :
 			core_restart || {
 				[ "$attempted" -eq 0 ] || rm -f "$RUNTIME_CONFIG.geodata"
 				warn "The previous config did not start either"
@@ -357,7 +346,7 @@ runtime_publish() {
 	fi
 	# dnsmasq would keep answers of the old site lists until their TTL ends.
 	[ "$running" -eq 0 ] || killall -HUP dnsmasq 2>/dev/null || :
-	rm -f "$RUNTIME_CONFIG.prev" "$PROFILE_FILE.prev" "$safety"
+	rm -f "$RUNTIME_CONFIG.prev" "$PROFILE_FILE.prev"
 }
 
 runtime_restore_prev() {
@@ -438,9 +427,8 @@ run_service() {
 	ensure_dir "$PKG_STATE_DIR" || { policy_cleanup; return 1; }
 	rm -f "$HEALTH_FILE" "$DEGRADED_FILE" "$OBSERVATORY_FILE"
 	error="$LAST_ERROR_FILE.err.$$"
-	# Saved DNS routes/latches require a checked build, not bytes left by a preview or failed start.
 	if ! { settings_load && {
-		{ [ -s "$RUNTIME_CONFIG" ] && [ -z "${DNS_RAW_VIA:-}${DNS_RAW_LOST:-}" ]; } ||
+		[ -s "$RUNTIME_CONFIG" ] ||
 			with_lock runtime_config_build "$RUNTIME_CONFIG"
 	}; } 2>"$error"; then
 		cat "$error" >&2
@@ -614,9 +602,7 @@ service_reload() {
 	if ! service_ready && ! { service_running && [ -f "$DEGRADED_FILE" ]; }; then
 		# A starting supervisor needs this lock for initial readiness; it reloads once ready.
 		service_running && return 0
-		# A stopped service still accepts selected-profile changes: latch a lost DNS route now.
-		[ -z "${DNS_RAW_VIA:-}" ] || runtime_refresh
-		return $?
+		return 0
 	fi
 	[ ! -f "$USER_STOP_FILE" ] || return 0
 	runtime_refresh || rc=$?
@@ -647,11 +633,6 @@ runtime_refresh() {
 		return 1
 	}
 	if cmp -s "$candidate" "$RUNTIME_CONFIG" && geodata_unchanged; then
-		dns_forward_safety_save "$candidate.profile" "$candidate.dns-uci" || {
-			rm -f "$candidate" "$candidate.profile"
-			return 1
-		}
-		rm -f "$candidate.dns-uci"
 		mv -f "$candidate.profile" "$PROFILE_FILE" || {
 			rm -f "$candidate" "$candidate.profile"
 			return 1

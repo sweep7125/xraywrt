@@ -77,17 +77,14 @@ Their Fake-IP traffic uses the selected `DIRECT` outbound.
 
 **Hijack DNS** in **Advanced → DNS** is off by default.
 Clients using the router as their DNS server still use its DNS path; encrypted DNS
-(DoH/DoT) can bypass redirection. Fake-IP uses IPv4 and mappings are lost when the core restarts. Other query types
-such as TXT, SRV and MX receive empty answers by default. Under **Advanced → DNS**
-you can enable direct forwarding in direct-first mode, or VPN forwarding.
-VPN forwarding requires an explicit DNS server IP and a suitable outbound tag.
-VPN forwarding never falls back to WAN DNS. If the saved tag disappears or is unsuitable,
-forwarding is forced off and a warning appears; select a valid tag and server
-and enable it again. A remote server may intercept DNS, so the chosen resolver
-may not receive queries. Confirm that chained outbounds use the intended VPN.
+(DoH/DoT) can bypass redirection. Fake-IP uses IPv4 and mappings are lost when the core restarts.
 
-**Block HTTPS/SVCB queries** returns empty answers for those types when
-forwarding other queries. FakeDNS can still block forwarding for names it handles.
+Other query types such as TXT, SRV and MX are resolved through the configured DNS
+servers by default. **Forward other DNS queries** can disable this, or follow the
+subscription setting. A previously saved disabled setting stays disabled after an upgrade unless the subscription supplies a value that takes precedence. **Block HTTPS/SVCB queries** is off by default and can also
+follow the subscription setting. The core chooses the resolver. FakeDNS can return an empty answer for TXT and
+other queries when `disableFallbackIfMatch` is enabled; otherwise fallback may
+reach another DNS server. HTTPS/SVCB queries are blocked when FakeDNS is selected first.
 
 A conflicting DNS server or global dnsmasq forward can prevent startup. Stop the
 other server or remove global forwards, and configure resolvers on WAN or in the
@@ -102,9 +99,10 @@ to control autostart. Core updates are manual: choose **Updates → Update the c
 or run `xraywrt core-update`. Subscriptions and remote lists have separate update
 controls. Core updates need free flash and RAM; check the Updates page first.
 
-When upgrading from a version that used the local TCP API, install core
-`0.26.5-r2` or newer before updating XrayWRT. The app uses the core API through
-a private Unix socket.
+Before installing the app APK directly, update any existing core to
+`xraywrt-core` `0.27.1-r1` or newer. The installer checks a manually installed
+core before updating the app; update an older one first. The app uses the core
+API through a private Unix socket.
 
 Geodata is supplied by the configuration or by you, not bundled. Add a rule
 database on Updates if a configuration requires one. Downloaded geodata has no

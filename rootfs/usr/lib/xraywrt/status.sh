@@ -90,13 +90,9 @@ status_warnings() {
 		code_message discord_voice_accounting 'Discord Voice inactive: enable conntrack accounting if needed (nf_conntrack_acct=1) and reload XrayWRT.'
 		printf '\n'
 	fi
-	if [ -n "${DNS_RAW_LOST:-}${DNS_RAW_VIA:-}" ]; then
-		code_message dns_raw_lost 'Forwarding of other DNS query types was turned off because its outbound became unavailable. Choose an outbound in Advanced DNS to re-enable it, or leave forwarding off.'
-		printf '\n'
-	fi
 	[ -r "$PROFILE_FILE" ] || return 0
 	# Cached warning records can belong to the previous subscription or a repaired selection.
-	sed -n '/\[E:dns_raw_lost\]$/!s/^warn //p' "$PROFILE_FILE"
+	sed -n 's/^warn //p' "$PROFILE_FILE"
 	sed -n 's/^ignored //p' "$PROFILE_FILE" | while IFS= read -r setting; do
 		code_message setting_ignored "ignored invalid or unknown setting '%s'" "$setting"
 		printf '\n'
@@ -154,12 +150,9 @@ status_netbird_present() {
 }
 
 status_json() {
-	local running=false policy=false config_valid=null config_error="" errors="" dns_outbounds=null
+	local running=false policy=false config_valid=null config_error="" errors=""
 
 	settings_load 2>/dev/null || errors="$(code_message settings_invalid "Invalid XrayWRT settings")"
-	if [ -n "${DNS_RAW_VIA:-}" ] && [ -z "${DNS_RAW_LOST:-}" ]; then
-		dns_outbounds="$(xraywrt-json dns-outbounds "$XRAY_CONFIG" "${PROFILE_NAME:-}" 2>/dev/null || echo null)"
-	fi
 	service_running && running=true
 	if [ "$running" = true ]; then
 		nft_active && route_active && policy=true
@@ -205,8 +198,6 @@ status_json() {
 		--arg fake_enabled "$(profile_get fake-enabled)" \
 		--arg direct_domains "$(profile_get direct-domains)" --arg sniff "$(profile_get sniff)" \
 		--arg warnings "$(status_warnings)" --arg fake_domains "$(profile_get fake-domains)" \
-		--argjson dns_outbounds "$dns_outbounds" \
-		--arg dns_raw_lost "${DNS_RAW_LOST:-}" --arg dns_raw_via "${DNS_RAW_VIA:-}" \
 		--arg geodata "$(status_geodata)"
 }
 
@@ -237,8 +228,6 @@ profile_json() {
 		if settings_load 2>/dev/null; then
 			configured_url="$SUBSCRIPTION_URL"
 			set -- --arg mode "$POLICY_MODE" --arg provider "$(settings_provider_entries)" \
-				--argjson dns_outbounds "$(xraywrt-json dns-outbounds "$XRAY_CONFIG" "$PROFILE_NAME" 2>/dev/null || echo null)" \
-				--arg dns_raw_lost "${DNS_RAW_LOST:-}" --arg dns_raw_via "${DNS_RAW_VIA:-}" \
 				--arg provider_lists "$({ lists_provided dst || lists_provided direct; } && echo 1)" --arg valid 1
 		else
 			NETBIRD_INTERFACE="$(settings_uci_get netbird_interface "$NETBIRD_DEFAULT_IFACE")"
@@ -266,8 +255,6 @@ profile_json() {
 		--arg direct_domains "$(profile_get direct-domains)" --arg sniff "$(profile_get sniff)" --arg dns "$DNS_MODE" \
 		--arg provider "$(settings_provider_entries)" \
 		--arg overrides "$PROVIDER_OVERRIDES" \
-		--argjson dns_outbounds "$(xraywrt-json dns-outbounds "$XRAY_CONFIG" "$PROFILE_NAME" 2>/dev/null || echo null)" \
-		--arg dns_raw_lost "${DNS_RAW_LOST:-}" --arg dns_raw_via "${DNS_RAW_VIA:-}" \
 		--arg sniff_skipped_targets "$(profile_entries rules-sniff-skipped-target)" \
 		--arg targets "$(lists_rule_targets)" --arg reserved "$(profile_entries rules-reserved)" \
 		--arg provider_lists "$({ lists_provided dst || lists_provided direct; } && echo 1)" \

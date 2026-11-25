@@ -9,6 +9,7 @@ trap 'rm -rf "$tmpdir"' EXIT
 setup_fake_uci "$tmpdir"
 load_modules constants.sh helpers.sh validate.sh settings.sh dns.sh lists.sh xray-config.sh core.sh service.sh config.sh
 setup_runtime_paths "$tmpdir"
+fake_uci_set xraywrt.settings.dns_forward_other_types 0
 FX="$ROOT_DIR/tests/fixtures/xray"
 command -v xray-test >/dev/null || fail 'xray-test missing from the test image'
 XRAY_BIN="$(command -v xray-test)"

@@ -15,13 +15,15 @@ migrate_settings() {
 	[ -n "$(uci_get geodata_cron)" ] || uci_set geodata_cron '0 5 * * *'
 	# Spec 13: new XrayWRT options; DNS upstreams stay empty (WAN DNS).
 	[ -n "$(uci_get mode)" ] || uci_set mode proxy-first
-	[ -n "$(uci_get dns_forward_other_types)" ] || uci_set dns_forward_other_types 0
+	[ -n "$(uci_get dns_forward_other_types)" ] || uci_set dns_forward_other_types 1
 	[ -n "$(uci_get block_https_svcb)" ] || uci_set block_https_svcb 0
 	# Spec 13: no core auto-update; the hourly tick no longer checks the core.
-	# Spec 7.5: other DNS types are no longer refused, only forwarded on request.
-	# HTTPS records of VPN sites are never forwarded, so the block option is gone.
+	# Spec 7.5: forwarding and HTTPS/SVCB blocking have independent defaults.
 	for opt in core_auto_update dns_refuse_other_types dns_block_https_rr; do
 		[ -z "$(uci_get "$opt")" ] || uci -q delete "$PKG_CONFIG.settings.$opt"
+	done
+	for opt in dns_raw_upstream dns_raw_via dns_raw_lost; do
+		uci -q delete "$PKG_CONFIG.settings.$opt" || :
 	done
 	if [ "$(uci_get mode)" = direct-first ]; then
 		case " $(uci_get provider_override) " in
@@ -105,9 +107,11 @@ migrate_rules() {
 	# subscription keeps them in LIST_DIR, a parked one in its directory.
 	migrate_rules_dir "$LIST_DIR" always_proxy_dst.txt direct_dst.txt fake_domains.txt direct_domains.txt "$RULES_FILE" || return 1
 	for id in $(subscription_ids); do
+		[ -n "$(uci -q get "$PKG_CONFIG.$id.dns_forward_other_types")" ] || uci -q set "$PKG_CONFIG.$id.dns_forward_other_types=1"
 		[ -n "$(uci -q get "$PKG_CONFIG.$id.block_https_svcb")" ] || uci -q set "$PKG_CONFIG.$id.block_https_svcb=0"
 		migrate_rules_dir "$XRAY_SUBS_DIR/$id/lists" dst.txt direct.txt fake.txt direct-domains.txt "$XRAY_SUBS_DIR/$id/lists/rules.txt" || return 1
-		for opt in fake_domains_source dst_list_source direct_list_source; do
+		for opt in fake_domains_source dst_list_source direct_list_source dns_raw_upstream dns_raw_via dns_raw_lost; do
+			uci -q delete "$PKG_CONFIG.settings.sub_${id}_$opt"
 			uci -q delete "$PKG_CONFIG.$id.$opt"
 		done
 	done

@@ -11,7 +11,7 @@ config settings 'settings'
 	option subscription_auto_update '1'
 	option lists_interval '0'
 	option geodata_cron '0 5 * * *'
-	option dns_forward_other_types '0'
+	option dns_forward_other_types '1'
 	option block_https_svcb '0'
 	option core_log_level 'warning'
 	# balancer_override: no list items means automatic selection (spec 16).

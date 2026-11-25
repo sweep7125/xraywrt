@@ -57,7 +57,8 @@ printf '{"https://list.test/mixed":"%s/mixed"}\n' "$tmpdir" >"$tmpdir/remote.jso
 gen "$tmpdir/src.json" ".rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {\"https://list.test/mixed\": \"$tmpdir/mixed\"}"
 jq -e '[.routing.rules[] | select(.outboundTag == "proxy") | .ip[]?] | index("203.0.113.10") == null and index("203.0.113.11") != null' <<<"$out" >/dev/null || fail 'uppercase TLS filters only TCP'
 grep -qx 'rules-sniff-skipped-target proxy' <<<"$prof" || fail 'profile identifies affected target'
-XRAY_LOCATION_ASSET="$XRAY_TEST_ASSETS" "$XRAY_TEST_BIN" run -test -c "$tmpdir/out.json" >"$tmpdir/core.log" 2>&1 || fail "uppercase TLS real core: $(cat "$tmpdir/core.log")"
+jq '(.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules[] | select(.action == "resolve") | .action) = "return"' "$tmpdir/out.json" >"$tmpdir/go-config.json"
+XRAY_LOCATION_ASSET="$XRAY_TEST_ASSETS" "$XRAY_TEST_BIN" run -test -c "$tmpdir/go-config.json" >"$tmpdir/core.log" 2>&1 || fail "uppercase TLS real core: $(cat "$tmpdir/core.log")"
 printf 'proxy\n' | xraywrt-json rules packet-addresses "$tmpdir/rules.txt" "$tmpdir/remote.json" "$tmpdir/out.json" >"$tmpdir/packet"
 grep -q '^direct;ip;203.0.113.10;443;tcp$' "$tmpdir/packet" || fail 'filtered URL tuple permits direct fallback'
 pass 'uppercase sniffing and partial URL fallback'

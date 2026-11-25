@@ -411,7 +411,6 @@ profile() {
 	# The router owns the core log level (spec 6.2); rows read per-connection core logs.
 	uci set xraywrt.settings.core_log_level=debug
 	uci set xraywrt.settings.block_client_ipv6=0
-	uci -q delete xraywrt.settings.dns_raw_upstream || true
 	uci -q delete xraywrt.settings.dns_forward_other_types || true
 	uci -q delete xraywrt.settings.block_https_svcb || true
 	uci -q delete xraywrt.settings.provider_override || true
@@ -1572,44 +1571,32 @@ check_native_dns_paths() {
 	wan_dns dhcp
 }
 
-# Spec 7.5: HTTPS/SVCB answered empty; other types empty by default, raw to
-# dns_raw_upstream only with dns_forward_other_types (direct-first).
+# DNS forwarding defaults on and follows the core resolver; it can be disabled.
 check_dns_types() {
 	local before=""
 	profile direct-first fake-ip false 0
 	set_lists empty
-	# Control: the WAN resolver has an HTTPS record; through the router it is empty.
-	dns_tcp_query c 198.20.22.2 53 public22.example.org HTTPS
+	dns_tcp_query c 192.0.2.1 53 txt22.example.net TXT
 	[ "$(dns_tcp_rcode)" = 0 ]
 	[ "$(dns_tcp_answers)" = 0001 ]
-	dns_tcp_query c 192.0.2.1 53 public22.example.org HTTPS
-	[ "$(dns_tcp_rcode)" = 0 ]
-	[ "$(dns_tcp_answers)" = 0000 ]
-	dns_tcp_query router 127.0.0.1 7874 public22.example.org HTTPS
-	[ "$(dns_tcp_rcode)" = 0 ]
-	[ "$(dns_tcp_answers)" = 0000 ]
-	# Default: other types get an empty answer and never reach the WAN resolver.
-	jq -e '.inbounds[] | select(.tag == "xraywrt-dns-in") | .settings | has("rewriteAddress") | not' /tmp/xraywrt/config.json
-	before="$(grep -c 'query\[TXT\] txt22.example.net' "$WORK/logs/dns-wan.log" || true)"
+	uci set xraywrt.settings.dns_forward_other_types=0
+	uci commit xraywrt
+	/usr/bin/xraywrt reload
 	dns_tcp_query c 192.0.2.1 53 txt22.example.net TXT
 	[ "$(dns_tcp_rcode)" = 0 ]
 	[ "$(dns_tcp_answers)" = 0000 ]
-	[ "$(grep -c 'query\[TXT\] txt22.example.net' "$WORK/logs/dns-wan.log" || true)" = "$before" ]
-	# Forward: raw to dns_raw_upstream; whitelist domains still get an empty answer.
-	uci set xraywrt.settings.dns_raw_upstream=198.20.22.2
 	uci set xraywrt.settings.dns_forward_other_types=1
 	uci commit xraywrt
 	/usr/bin/xraywrt reload
-	jq -e '.inbounds[] | select(.tag == "xraywrt-dns-in") | .settings.rewriteAddress == "198.20.22.2"' /tmp/xraywrt/config.json
-	before="$(grep -c 'query\[TXT\] txt22.example.net from 198.20.22.1' "$WORK/logs/dns-wan.log" || true)"
-	dns_tcp_query c 192.0.2.1 53 txt22.example.net TXT
-	[ "$(dns_tcp_rcode)" = 0 ]
-	[ "$(dns_tcp_answers)" = 0001 ]
-	grep -q 6d32322d747874 "$WORK/logs/dns-tcp-last.hex"
-	[ "$(grep -c 'query\[TXT\] txt22.example.net from 198.20.22.1' "$WORK/logs/dns-wan.log")" -gt "$before" ]
-	dns_tcp_query router 127.0.0.1 7874 fake22.example.net TXT
-	[ "$(dns_tcp_rcode)" = 0 ]
-	[ "$(dns_tcp_answers)" = 0000 ]
+	# FakeDNS itself blocks HTTPS/SVCB for its domains, despite upstream records.
+	for type in SVCB HTTPS; do
+		dns_tcp_query c 198.20.22.2 53 public22.example.org "$type"
+		[ "$(dns_tcp_rcode)" = 0 ]
+		[ "$(dns_tcp_answers)" = 0001 ]
+		dns_tcp_query router 127.0.0.1 7874 public22.example.org "$type"
+		[ "$(dns_tcp_rcode)" = 0 ]
+		[ "$(dns_tcp_answers)" = 0000 ]
+	done
 	# Both raw record types exist upstream; the opt-in blocks only those types.
 	for type in SVCB HTTPS; do
 		dns_tcp_query router 127.0.0.1 7874 raw22.example.net "$type"
@@ -1628,9 +1615,19 @@ check_dns_types() {
 	[ "$(dns_tcp_rcode)" = 0 ]
 	[ "$(dns_tcp_answers)" = 0001 ]
 	grep -q 6d32322d747874 "$WORK/logs/dns-tcp-last.hex"
+	# This fixture permits DNS fallback when FakeDNS cannot answer TXT.
+	dns_tcp_query router 127.0.0.1 7874 fake22.example.net TXT
+	[ "$(dns_tcp_rcode)" = 0 ]
+	[ "$(dns_tcp_answers)" = 0001 ]
+	# With fallback disabled, the matched FakeDNS server returns an empty answer.
+	/usr/bin/xraywrt read-config | jq -r .content | jq '.dns.disableFallbackIfMatch = true' > /tmp/xraywrt-config.network-fixture
+	/usr/bin/xraywrt save-config /tmp/xraywrt-config.network-fixture
+	/usr/bin/xraywrt reload
+	before="$(grep -cF 'query[TXT] fake22.example.net' "$WORK/logs/dns-wan.log" || true)"
 	dns_tcp_query router 127.0.0.1 7874 fake22.example.net TXT
 	[ "$(dns_tcp_rcode)" = 0 ]
 	[ "$(dns_tcp_answers)" = 0000 ]
+	[ "$(grep -cF 'query[TXT] fake22.example.net' "$WORK/logs/dns-wan.log" || true)" = "$before" ]
 	dns_udp 192.0.2.1 fake22.example.net A fake-ip
 	dns_tcp_query c 198.20.22.2 53 internal22.example.net AAAA
 	[ "$(dns_tcp_rcode)" = 0 ]
@@ -1641,7 +1638,6 @@ check_dns_types() {
 	[ "$(dns_tcp_answers)" = 0001 ]
 	grep -q 20010db8ffff00000000000000000003 "$WORK/logs/dns-tcp-last.hex"
 	uci -q delete xraywrt.settings.block_https_svcb
-	uci -q delete xraywrt.settings.dns_raw_upstream
 	uci -q delete xraywrt.settings.dns_forward_other_types
 	uci commit xraywrt
 	/usr/bin/xraywrt reload

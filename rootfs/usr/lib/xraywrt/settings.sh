@@ -260,19 +260,7 @@ settings_generator_load() {
 	PROFILE_NAME="$(settings_subscription_option profile)"
 	GEODATA_ASSETS_JSON="$(settings_uci_get geodata_asset '[]')"
 	GEODATA_CRON="$(settings_uci_get geodata_cron '0 5 * * *')"
-	DNS_RAW_UPSTREAM="$(settings_uci_get dns_raw_upstream)"
-	case "$DNS_RAW_UPSTREAM" in
-	*[!0-9A-Fa-f:.\[\]]*) settings_invalid dns_raw_upstream "$DNS_RAW_UPSTREAM" || return 1 ;;
-	esac
-	DNS_RAW_LOST="$(settings_uci_get dns_raw_lost)"
-	case "$DNS_RAW_LOST" in
-	*[[:cntrl:]]*) settings_invalid dns_raw_lost "$DNS_RAW_LOST" || return 1 ;;
-	esac
-	DNS_RAW_VIA="$(settings_uci_get dns_raw_via)"
-	case "$DNS_RAW_VIA" in
-	*[[:cntrl:]]*) settings_invalid dns_raw_via "$DNS_RAW_VIA" || return 1 ;;
-	esac
-	DNS_FORWARD_OTHER_TYPES="$(PROVIDER_KEYS='' settings_bool dns_forward_other_types 0)"
+	DNS_FORWARD_OTHER_TYPES="$(PROVIDER_KEYS='' settings_bool dns_forward_other_types 1)"
 	LOG_LEVEL_OVERRIDE=0
 	case " $PROVIDER_OVERRIDES " in *" core_log_level "*) LOG_LEVEL_OVERRIDE=1 ;; esac
 	UCI_CORE_LOG_LEVEL="$(settings_uci_get core_log_level warning)"

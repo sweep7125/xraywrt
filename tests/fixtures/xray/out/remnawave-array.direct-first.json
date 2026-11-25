@@ -289,11 +289,7 @@
       "settings": {
         "rules": [
           {
-            "action": "hijack",
-            "qType": "1,28"
-          },
-          {
-            "action": "return"
+            "action": "resolve"
           }
         ]
       },

@@ -70,11 +70,6 @@ assert_eq "{\"tag\":\"xraywrt-dns-internal\",\"servers\":[{\"address\":\"fakedns
 assert_eq '[["xraywrt-dns-internal","other"],["other"]]' "$(jq -c '[.routing.rules[-2:][].inboundTag]' <<<"$out")" 'old DNS tag renamed in rules'
 prof_has 'warn dns tag "prov" renamed to xraywrt-dns-internal'
 prof_lacks 'uses-wan-dns'
-# Direct forwarding before WAN DNS arrives at boot: off now, rebuilt by net_refresh later.
-gen "$tmpdir/src.json" '.mode_override = true | .mode = "direct-first" | .dns_forward_other_types = "1" | .wan_dns = []'
-assert_eq 0 "$rc" "direct forwarding without WAN DNS: $errtxt"
-assert_eq '{"action":"return"}' "$(jq -c '.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules[-1]' <<<"$out")" 'no WAN DNS yet: other types return'
-prof_has 'uses-wan-dns'
 jq '.dns = {"servers": ["fakedns"]}' "$FX/src/single.json" >"$tmpdir/src.json"
 gen "$tmpdir/src.json"
 assert_eq '"192.0.2.53"' "$(jq -c '.dns.servers[-1]' <<<"$out")" 'only fakedns servers: default resolver appended'
@@ -150,138 +145,31 @@ pass 'fake-IP'
 dnsob() { jq -c '.outbounds[] | select(.tag == "xraywrt-dns")' <<<"$out"; }
 aaaa='{"qType":"1,28","action":"hijack"}'
 dnsin() { jq -c '.inbounds[] | select(.tag == "xraywrt-dns-in") | .settings' <<<"$out"; }
-fwd='.mode_override = true | .mode = "direct-first" | .dns_forward_other_types = 1'
-# Opt-in filters HTTPS/SVCB before raw egress without changing other types.
-for mode in direct-first proxy-first; do
- for via in direct selected; do
-  [ "$mode:$via" != 'proxy-first:direct' ] || continue
-  extra='.dns_forward_other_types = 1'
-  [ "$via" != selected ] || extra='.dns_raw_via = "proxy" | .dns_raw_upstream = "192.0.2.54"'
-  tag="$(jq -r '.outbounds[0].tag' "$FX/src/single.json")"
-  [ "$via" != selected ] || extra=".dns_raw_via = \"$tag\" | .dns_raw_upstream = \"192.0.2.54\""
-  gen "$FX/src/single.json" ".mode_override = true | .mode = \"$mode\" | $extra | .block_https_svcb = 1"
-  assert_eq "[$aaaa,{\"qType\":\"65,64\",\"action\":\"return\"},{\"action\":\"direct\"}]" "$(dnsob | jq -c .settings.rules)" "$mode $via filters HTTPS/SVCB only"
- done
+for mode in proxy-first direct-first; do
+ gen "$FX/src/single.json" ".mode_override = true | .mode = \"$mode\""
+ assert_eq '[{"action":"resolve"}]' "$(dnsob | jq -c .settings.rules)" "$mode default resolves other types"
+ assert_eq '{"allowedNetwork":"tcp,udp"}' "$(dnsin)" 'no raw rewrite'
+ gen "$FX/src/single.json" ".mode_override = true | .mode = \"$mode\" | .dns_forward_other_types = 0"
+ assert_eq "[$aaaa]" "$(dnsob | jq -c .settings.rules)" "$mode forwarding off"
+ gen "$FX/src/single.json" ".mode_override = true | .mode = \"$mode\" | .block_https_svcb = 1"
+ assert_eq '[{"qType":"65,64","action":"return"},{"action":"resolve"}]' "$(dnsob | jq -c .settings.rules)" "$mode HTTPS block"
 done
-jq '.xraywrt = {"block-https-svcb": true}' "$FX/src/single.json" >"$tmpdir/block-provider.json"
-gen "$tmpdir/block-provider.json" "$fwd"
-assert_eq '{"qType":"65,64","action":"return"}' "$(dnsob | jq -c '.settings.rules[1]')" 'provider enables HTTPS/SVCB block'
-gen "$tmpdir/block-provider.json" "$fwd | .block_https_svcb_override = true | .block_https_svcb = 0"
-assert_eq '{"action":"direct"}' "$(dnsob | jq -c '.settings.rules[1]')" 'explicit off overrides provider'
-jq '.xraywrt = {"block-https-svcb": false}' "$FX/src/single.json" >"$tmpdir/block-provider-off.json"
-gen "$tmpdir/block-provider-off.json" "$fwd | .block_https_svcb = 1"
-assert_eq '{"action":"direct"}' "$(dnsob | jq -c '.settings.rules[1]')" 'provider off beats unoverridden UCI on'
-gen "$tmpdir/block-provider-off.json" "$fwd | .block_https_svcb = 1 | .block_https_svcb_override = true"
-assert_eq '{"qType":"65,64","action":"return"}' "$(dnsob | jq -c '.settings.rules[1]')" 'explicit on overrides provider off'
-pass 'HTTPS/SVCB raw forwarding opt-in'
-
-gen "$FX/src/single.json"
-assert_eq "{\"tag\":\"xraywrt-dns\",\"protocol\":\"dns\",\"streamSettings\":{\"sockopt\":{\"mark\":2}},\"settings\":{\"rules\":[$aaaa,{\"action\":\"return\"}]}}" "$(dnsob)" 'defaults: other types empty'
-assert_eq '{"allowedNetwork":"tcp,udp"}' "$(dnsin)" 'defaults: no rewrite'
-gen "$FX/src/single.json" '.rules_file = "'"$fd"'"'
-assert_eq "[$aaaa,{\"action\":\"return\"}]" "$(dnsob | jq -c .settings.rules)" 'not forwarding: no whitelist rule'
-gen "$FX/src/single.json" '.dns_forward_other_types = 1'
-assert_eq '{"action":"return"}' "$(dnsob | jq -c .settings.rules[-1])" 'proxy-first ignores dns_forward_other_types'
-gen "$FX/src/single.json" "$fwd"' | .rules_file = "'"$fd"'"'
-assert_eq "[$aaaa,{\"domain\":$(jq -c .domains <<<"$own"),\"action\":\"return\"},{\"action\":\"direct\"}]" "$(dnsob | jq -c .settings.rules)" 'direct-first forward: whitelist empty, rest raw'
-assert_eq '{"allowedNetwork":"tcp,udp","rewriteAddress":"192.0.2.53","rewritePort":53}' "$(dnsin)" 'forward: rewrite to WAN DNS'
-dnsob | jq -e '.streamSettings.sockopt | has("dialerProxy") | not' >/dev/null || fail 'forward: no dialerProxy'
-gen "$tmpdir/fake.json" "$fwd"
-assert_eq '{"domain":["geosite:netflix"],"action":"return"}' "$(dnsob | jq -c .settings.rules[1])" 'provider whitelist'
-assert_eq '{"qType":"65,64","action":"return"}' "$(dnsob | jq -c .settings.rules[2])" 'bare fakedns server: HTTPS records stay empty'
-gen "$tmpdir/fake.json" "$fwd | .block_https_svcb_override = true | .block_https_svcb = 0"
-assert_eq '{"qType":"65,64","action":"return"}' "$(dnsob | jq -c .settings.rules[2])" 'bare fakedns protection survives explicit opt-out'
-for server in '"fakedns"' '{"address":"fakedns"}' '{"address":"fakedns","domains":[]}'; do
- jq --argjson server "$server" '.dns.servers = [$server] | .xraywrt = {"block-https-svcb": true}' "$FX/src/single.json" >"$tmpdir/unrestricted-opt-out.json"
- gen "$tmpdir/unrestricted-opt-out.json" "$fwd | .block_https_svcb_override = true | .block_https_svcb = 0"
- assert_eq "[$aaaa,{\"qType\":\"65,64\",\"action\":\"return\"},{\"action\":\"direct\"}]" "$(dnsob | jq -c .settings.rules)" "unrestricted $server protection survives explicit opt-out"
+jq '.xraywrt = {"dns-forward-other-types": false, "block-https-svcb": true}' "$FX/src/single.json" >"$tmpdir/provider.json"
+gen "$tmpdir/provider.json"
+assert_eq "[$aaaa]" "$(dnsob | jq -c '.settings.rules')" 'provider disables forwarding'
+gen "$tmpdir/provider.json" '.dns_forward_override = true | .dns_forward_other_types = 1'
+assert_eq '[{"qType":"65,64","action":"return"},{"action":"resolve"}]' "$(dnsob | jq -c .settings.rules)" 'user enables forwarding; provider blocks HTTPS'
+gen "$tmpdir/provider.json" '.dns_forward_override = true | .dns_forward_other_types = 1 | .block_https_svcb_override = true | .block_https_svcb = 0'
+assert_eq '[{"action":"resolve"}]' "$(dnsob | jq -c .settings.rules)" 'user allows HTTPS'
+for fallback in true false; do
+ jq --argjson fallback "$fallback" '.dns.disableFallbackIfMatch = $fallback' "$tmpdir/fake.json" >"$tmpdir/fake-fallback.json"
+ gen "$tmpdir/fake-fallback.json"
+ assert_eq "$fallback" "$(jq -r .dns.disableFallbackIfMatch <<<"$out")" 'provider FakeDNS fallback policy preserved'
+ assert_eq '[{"action":"resolve"}]' "$(dnsob | jq -c .settings.rules)" 'FakeDNS server selection is owned by the core'
 done
-jq '.dns.servers = ["https://dns.example.org/dns-query"]' "$FX/src/single.json" >"$tmpdir/own-dns.json"
-gen "$tmpdir/own-dns.json" "$fwd"' | .wan_dns = []'
-assert_eq '{"action":"return"}' "$(dnsob | jq -c .settings.rules[-1])" 'no raw address: empty'
-assert_eq '{"allowedNetwork":"tcp,udp"}' "$(dnsin)" 'no raw address: no rewrite'
-# Provider key dns-forward-other-types applies in the same pass; provider_override keeps UCI.
-jq '.xraywrt = {"dns-forward-other-types": true}' "$FX/src/single.json" >"$tmpdir/pfwd.json"
-gen "$tmpdir/pfwd.json" '.mode_override = true | .mode = "direct-first"'
-assert_eq '{"action":"direct"}' "$(dnsob | jq -c .settings.rules[-1])" 'provider forward key applies'
-gen "$tmpdir/pfwd.json" '.mode_override = true | .mode = "direct-first" | .dns_forward_override = true'
-assert_eq '{"action":"return"}' "$(dnsob | jq -c .settings.rules[-1])" 'provider_override keeps UCI 0'
-jq '.xraywrt = {"dns-forward-other-types": false}' "$FX/src/single.json" >"$tmpdir/pfwd0.json"
-gen "$tmpdir/pfwd0.json" "$fwd"
-assert_eq '{"action":"return"}' "$(dnsob | jq -c .settings.rules[-1])" 'provider false beats UCI 1'
-gen "$FX/src/full.json"
-prof_lacks 'uses-wan-dns'
-gen "$FX/src/full.json" "$fwd"
-prof_has 'uses-wan-dns'
-gen "$FX/src/full.json" "$fwd"' | .dns_raw_upstream = "[2001:db8::53]:5353"'
-assert_eq '{"allowedNetwork":"tcp,udp","rewriteAddress":"2001:db8::53","rewritePort":5353}' "$(dnsin)" 'raw upstream'
-prof_lacks 'uses-wan-dns'
-tag="$(jq -r '.outbounds[0].tag' "$FX/src/single.json")"
-gen "$FX/src/single.json" ".dns_raw_via = \"$tag\" | .dns_raw_upstream = \"192.0.2.54\""
-assert_eq "{\"mark\":2,\"dialerProxy\":\"$tag\"}" "$(dnsob | jq -c .streamSettings.sockopt)" 'raw_via dialerProxy'
-assert_eq '{"action":"direct"}' "$(dnsob | jq -c .settings.rules[-1])" 'raw_via forwards in proxy-first'
-assert_eq '{"allowedNetwork":"tcp,udp","rewriteAddress":"192.0.2.54","rewritePort":53}' "$(dnsin)" 'raw_via: explicit rewrite'
-gen "$FX/src/single.json" '.dns_raw_via = "nope" | .dns_raw_upstream = "192.0.2.54" | .block_https_svcb = 1'
-assert_eq 0 "$rc" "missing DNS outbound forces off: $errtxt"
-prof_has 'dns-raw-lost nope'
-assert_eq '{"action":"return"}' "$(dnsob | jq -c .settings.rules[-1])" 'missing outbound cannot fall back to another route'
-pass 'DNS outbound rules'
-
-# Via never falls back to WAN, even for manually saved settings.
-for wan in '["192.0.2.53"]' '[]'; do
- gen_fails "$tmpdir/own-dns.json" 'config: dns_raw_upstream is required with dns_raw_via; set an explicit DNS server IP address and optional port' ".dns_raw_via = \"$tag\" | .wan_dns = $wan"
-done
-for value in 'dns.example' '999.2.3.4' '192.0.2.53:0' '192.0.2.53:65536' '[2001:::53]:53' '192.0.2.0/24' '192.000.2.53' '01.2.3.4' '192.000.2.53:5353' '01.2.3.4:5353' '::ffff:192.000.2.53' '::ffff:01.2.3.4' '[::ffff:192.000.2.53]:5353' '[::ffff:01.2.3.4]:5353'; do
- gen_fails "$FX/src/single.json" 'config: dns_raw_upstream must be an IP address with an optional port (1-65535)' ".dns_raw_via = \"$tag\" | .dns_raw_upstream = \"$value\""
-done
-for value in '192.0.2.54' '192.0.2.54:5353' '2001:db8::53' '[2001:db8::53]:5353' '::ffff:192.0.2.53' '[::ffff:192.0.2.53]:5353'; do
- gen "$FX/src/full.json" ".dns_raw_via = \"$tag\" | .dns_raw_upstream = \"$value\""
- assert_eq 0 "$rc" "explicit via address: $errtxt"
- prof_lacks 'uses-wan-dns'
-done
-pass 'VPN raw DNS requires an explicit valid IP'
-
-# An inactive saved server is retained, but never creates an invalid rebinding exemption.
-for source in "$FX/src/full.json" "$tmpdir/pfwd0.json"; do
- for mode in proxy-first direct-first; do
-  gen "$source" ".mode_override = true | .mode = \"$mode\" | .dns_raw_upstream = \"192.0.2.53:0\" | .dns_raw_via = \"\" | .dns_forward_other_types = 0"
-  assert_eq 0 "$rc" "$mode off/provider-off with saved invalid upstream: $errtxt"
-  assert_eq '{"allowedNetwork":"tcp,udp"}' "$(dnsin)" 'inactive upstream creates no DNS rewrite'
-  assert_eq '{"action":"return"}' "$(dnsob | jq -c .settings.rules[-1])" 'inactive forwarding keeps empty answers'
-  jq -e '[.outbounds[] | select(.protocol == "freedom") | .settings.finalRules[]? | select(.action == "allow" and has("ip"))] == []' <<<"$out" >/dev/null || fail 'invalid inactive upstream must not create a rebinding exemption'
-  assert_eq '192.0.2.53:0' "$(jq -r .dns_raw_upstream "$tmpdir/params.json")" 'inactive saved server is preserved'
- done
-done
-for source in "$FX/src/full.json" "$tmpdir/pfwd.json"; do
- gen_fails "$source" 'config: dns_raw_upstream must be an IP address with an optional port (1-65535)' '.mode_override = true | .mode = "direct-first" | .dns_forward_other_types = 1 | .dns_raw_upstream = "192.0.2.53:0"'
-done
-pass 'inactive invalid DNS server does not block off/provider-off generation'
-
-
-# Catalog uses selected original outbounds, not generated handlers or balancers.
-jq '.outbounds += [{tag:"plain",protocol:"freedom"},{tag:"blocked",protocol:"blackhole"},{tag:"resolver",protocol:"dns"},{tag:"loop",protocol:"loopback"},{tag:"VPN 🇷🇺 = primary",protocol:"freedom",streamSettings:{sockopt:{dialerProxy:"proxy"}}},{protocol:"socks"}] | .routing.balancers = [{tag:"pool",selector:["proxy"]}]' "$FX/src/single.json" >"$tmpdir/catalog.json"
-assert_eq '["proxy","VPN 🇷🇺 = primary"]' "$(xraywrt-json dns-outbounds "$tmpdir/catalog.json" '')" 'safe DNS outbound catalog'
-jq -s '[.[0] + {remarks:"first"}, .[0] + {remarks:"chosen",outbounds:[{protocol:"socks",tag:"chosen tag"}]}]' "$tmpdir/catalog.json" >"$tmpdir/catalog-array.json"
-assert_eq '["chosen tag"]' "$(xraywrt-json dns-outbounds "$tmpdir/catalog-array.json" chosen)" 'selected original profile'
-jq '.[0].xraywrt = {"router-profile":"chosen"}' "$tmpdir/catalog-array.json" >"$tmpdir/catalog-pinned.json"
-assert_eq '["chosen tag"]' "$(xraywrt-json dns-outbounds "$tmpdir/catalog-pinned.json" first)" 'provider pin beats selection'
-for tag in plain blocked resolver loop pool xraywrt-direct; do
- gen "$tmpdir/catalog.json" ".dns_raw_via = \"$tag\" | .dns_raw_upstream = \"192.0.2.54\""
- assert_eq 0 "$rc" "unsuitable DNS outbound forces off: $errtxt"
- prof_has "dns-raw-lost $tag"
- assert_eq '{"action":"return"}' "$(dnsob | jq -c .settings.rules[-1])" 'unsuitable outbound cannot forward'
-done
-for source in "$tmpdir/catalog-array.json" "$tmpdir/catalog-pinned.json"; do
- gen "$source" '.profile = "chosen" | .dns_raw_via = "proxy" | .dns_raw_upstream = "192.0.2.54"'
- assert_eq 0 "$rc" "selected original profile forces off: $errtxt"
- prof_has 'dns-raw-lost proxy'
- assert_eq '{"action":"return"}' "$(dnsob | jq -c .settings.rules[-1])" 'selected profile cannot borrow another profile outbound'
-done
-gen "$tmpdir/catalog.json" '.dns_raw_via = "VPN 🇷🇺 = primary" | .dns_raw_upstream = "192.0.2.54"'
-assert_eq 0 "$rc" "chained freedom outbound: $errtxt"
-assert_eq 'VPN 🇷🇺 = primary' "$(dnsob | jq -r .streamSettings.sockopt.dialerProxy)" 'explicit chain preserved'
-pass 'DNS outbound catalog and generator agree'
-
+gen "$FX/src/single.json" '.dns_raw_via = "missing" | .dns_raw_upstream = "bad"'
+assert_eq '{"action":"resolve"}' "$(dnsob | jq -c '.settings.rules[-1]')" 'legacy raw settings ignored'
+pass 'DNS resolve rules and provider overrides'
 
 # Settings and old cache readers use activation, never the count.
 setup_fake_uci "$tmpdir"

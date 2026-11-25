@@ -109,17 +109,7 @@ status_args=(--argjson running false --argjson enabled false --arg state stopped
 "$helper" build status "${status_args[@]}" >"$tmpdir/lenient-status.json"
 assert_true 'status numeric snapshot leniency' jq -e '.lists == {dst:null,src:null,direct:0,direct_src:0}' "$tmpdir/lenient-status.json" >/dev/null
 pass 'JSON helper: empty and malformed status counts are null'
-for catalog in '[]' '["saved |] <tag>"]' null; do
- "$helper" build profile --arg dns_raw_via 'saved |] <tag>' --argjson dns_outbounds "$catalog" >"$tmpdir/safety-profile.json"
- expected=''; [ "$catalog" != '[]' ] || expected='saved |] <tag>'
- assert_eq "$expected" "$(jq -r .dns_raw_lost "$tmpdir/safety-profile.json")" 'only authoritative absent catalog exposes missing tag'
- "$helper" build status "${status_args[@]}" --arg dns_raw_via 'saved |] <tag>' --argjson dns_outbounds "$catalog" --arg warnings 'lost [E:dns_raw_lost]' >"$tmpdir/safety-status.json"
- assert_eq "$([ -z "$expected" ] && echo 0 || echo 1)" "$(jq '.warnings | length' "$tmpdir/safety-status.json")" 'status safety warning follows current subscription/catalog, not old cache'
-done
-"$helper" build profile --arg dns_raw_lost 'saved |] <tag>' --argjson dns_outbounds '["saved |] <tag>"]' >"$tmpdir/safety-profile.json"
-assert_eq 'saved |] <tag>' "$(jq -r .dns_raw_lost "$tmpdir/safety-profile.json")" 'persisted lost tag remains latched after restoration'
-pass 'JSON helper: safety state distinguishes absent, present and failed catalogs'
-parity 'empty profile has no targets' '{"mode":"proxy-first","mode_source":null,"fake_enabled":false,"direct_domains":null,"sniff":"0","dns":"redir-host","provider":{},"overrides":0,"targets":[],"sniff_skipped_targets":[],"dns_outbounds":[],"dns_raw_lost":"","reserved":[],"provider_lists":false,"provider_sources":{"vpn":{"addresses":[],"links":0,"truncated":false},"direct":{"addresses":[],"links":0,"truncated":false}}}' build profile --arg mode proxy-first --arg dns redir-host --arg provider '' --arg overrides '' --arg targets '' --arg reserved ''
+parity 'empty profile has no targets' '{"mode":"proxy-first","mode_source":null,"fake_enabled":false,"direct_domains":null,"sniff":"0","dns":"redir-host","provider":{},"overrides":0,"targets":[],"sniff_skipped_targets":[],"reserved":[],"provider_lists":false,"provider_sources":{"vpn":{"addresses":[],"links":0,"truncated":false},"direct":{"addresses":[],"links":0,"truncated":false}}}' build profile --arg mode proxy-first --arg dns redir-host --arg provider '' --arg overrides '' --arg targets '' --arg reserved ''
 parity 'diagnostics omit unused ports' '{"conflicts":[],"flash_free_kb":null,"tmp_xraywrt_kb":null,"ram_available_kb":null,"xray_rss_kb":null,"router_model":null,"dns_guard_error":null,"config_test":{"valid":null,"output":[]}}' build diagnostics --arg ports ''
 printf '%s\n' '{"id":"10-3","started":10,"state":"ok"}' >"$tmpdir/history-valid.json"
 printf '%s\n' '{"id":"10-x","started":10,"state":"ok"}' >"$tmpdir/history-invalid.json"
@@ -156,4 +146,4 @@ for i in "${!lax_inputs[@]}"; do
  pass "JSON helper: native leniency emits strict JSON [${lax_inputs[$i]}]"
 done
 
-parity 'profile targets of My rules and reserved tags' '{"mode":"direct-first","mode_source":null,"fake_enabled":false,"direct_domains":null,"sniff":"0","dns":"","provider":{},"overrides":0,"targets":["proxy","pool"],"sniff_skipped_targets":[],"dns_outbounds":["VPN tag"],"dns_raw_lost":"","reserved":["direct"],"provider_lists":false,"provider_sources":{"vpn":{"addresses":[],"links":0,"truncated":false},"direct":{"addresses":[],"links":0,"truncated":false}}}' build profile --arg mode direct-first --arg dns '' --arg provider '' --arg overrides '' --arg targets $'proxy\npool' --argjson dns_outbounds '["VPN tag"]' --arg reserved direct
+parity 'profile targets of My rules and reserved tags' '{"mode":"direct-first","mode_source":null,"fake_enabled":false,"direct_domains":null,"sniff":"0","dns":"","provider":{},"overrides":0,"targets":["proxy","pool"],"sniff_skipped_targets":[],"reserved":["direct"],"provider_lists":false,"provider_sources":{"vpn":{"addresses":[],"links":0,"truncated":false},"direct":{"addresses":[],"links":0,"truncated":false}}}' build profile --arg mode direct-first --arg dns '' --arg provider '' --arg overrides '' --arg targets $'proxy\npool' --arg reserved direct

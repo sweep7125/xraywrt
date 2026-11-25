@@ -46,7 +46,8 @@ remains installed with the service disabled. For Russian LuCI, also install
 
 Run the installer again to update app packages and an installed core package.
 On existing installations, it updates a managed core package before the app.
-For manual upgrades from the TCP API, install core `0.26.5-r2` or newer first.
+For manual upgrades or older cores installed outside APK, install the
+`xraywrt-core` package at version `0.27.1-r1` or newer before updating XrayWRT.
 The core is not updated automatically: use **Updates → Update the core** or
 `xraywrt core-update`. Subscription and remote-list updates are separate.
 Check available flash and RAM before updating. A stopped service stays stopped.

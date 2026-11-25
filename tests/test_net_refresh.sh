@@ -37,10 +37,8 @@ check_wan_dns() (
  dns_apply() { :; }
  nft_apply() { :; }
  runtime_refresh() { echo runtime >>"$events"; }
- DNS_RAW_UPSTREAM=192.0.2.1
  case "$scenario" in
  used) echo uses-wan-dns >"$PROFILE_FILE" ;;
- raw) DNS_RAW_UPSTREAM='' ;;
  unused) : ;;
  esac
  net_refresh
@@ -51,13 +49,13 @@ check_wan_dns() (
  printf 'nameserver 10.0.0.9\n' >"$DNS_AUTO_RESOLVFILE"
  net_refresh
  case "$scenario" in
- unused | raw) assert_eq '' "$(cat "$events")" "$scenario: unused WAN DNS change keeps the core" ;;
+ unused) assert_eq '' "$(cat "$events")" "$scenario: unused WAN DNS change keeps the core" ;;
  *) assert_eq runtime "$(cat "$events")" "$scenario: WAN DNS change refreshes the runtime config" ;;
  esac
  printf 'nameserver 10.0.0.1\n' >"$DNS_AUTO_RESOLVFILE"
  sed -i '$d' "$tmpdir/routes.4"
 )
-for s in used raw unused; do check_wan_dns "$s"; done
+for s in used unused; do check_wan_dns "$s"; done
 pass 'WAN DNS change restarts the core only when the config uses it'
 
 check_refresh() (

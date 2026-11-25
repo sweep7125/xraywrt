@@ -970,36 +970,6 @@ msgstr "Обычные DNS-запросы идут на роутер. Шифро
 msgid "Download the subscription directly"
 msgstr "Скачивать подписку напрямую"
 
-msgid "Other DNS queries (TXT, SRV, MX…)"
-msgstr "Другие DNS-запросы (TXT, SRV, MX…)"
-
-msgid "Xray handles A and AAAA. Choose where to send other queries. Direct forwarding uses plain DNS visible to your internet provider."
-msgstr "Xray обрабатывает A и AAAA. Выберите, куда отправлять остальные запросы. При прямой пересылке обычный DNS виден интернет-провайдеру."
-
-msgid "Do not forward"
-msgstr "Не пересылать"
-
-msgid "Forward directly"
-msgstr "Пересылать напрямую"
-
-msgid "Forward through the VPN"
-msgstr "Пересылать через VPN"
-
-msgid "DNS server for these queries"
-msgstr "DNS-сервер для этих запросов"
-
-msgid "Use IP, IPv4:port or [IPv6]:port. Required via VPN. For direct forwarding, leave blank to use your connection’s DNS."
-msgstr "Укажите IP, IPv4:порт или [IPv6]:порт. Через VPN адрес обязателен. При прямой пересылке пустое поле использует DNS подключения."
-
-msgid "Outbound tag"
-msgstr "Тег outbound"
-
-msgid "Choose an outbound from the original configuration. Chained outbounds keep their configured route."
-msgstr "Выберите outbound из исходной конфигурации. Цепочки outbound сохраняют заданный маршрут."
-
-msgid "Choose an available outbound from the configuration."
-msgstr "Выберите доступный outbound из конфигурации."
-
 msgid "Xray log detail"
 msgstr "Подробность журнала Xray"
 
@@ -1585,30 +1555,6 @@ msgstr "Ссылка на список IP-адресов"
 msgid "Other site forms: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Comments start with #. Saving is refused until every line is valid."
 msgstr "Другие виды сайтов: keyword:video, regexp:^cdn[0-9]+\\.example\\.com$, ext:custom.dat:tag. Комментарии начинаются с #. Пока есть неверная строка, сохранить нельзя."
 
-msgid "No suitable outbounds. Add a tagged VPN outbound to the configuration."
-msgstr "Нет подходящих outbound. Добавьте в конфигурацию outbound для VPN с тегом."
-
-msgid "Choose an outbound"
-msgstr "Выберите outbound"
-
-msgid "%s (not available)"
-msgstr "%s (недоступен)"
-
-msgid "Enter a DNS server IP[:port] for forwarding through the VPN."
-msgstr "Укажите IP[:порт] DNS-сервера для пересылки через VPN."
-
-msgid "Enter a valid IP address with an optional port (1–65535)."
-msgstr "Укажите корректный IP-адрес и, при необходимости, порт (1–65535)."
-
-msgid "Forwarding of other DNS query types was turned off because its outbound became unavailable. Choose an outbound in Advanced DNS to re-enable it, or leave forwarding off."
-msgstr "Пересылка остальных типов DNS-запросов отключена: выбранный outbound стал недоступен. Чтобы включить её снова, выберите outbound в «Дополнительно → DNS» или оставьте пересылку выключенной."
-
-msgid "Forwarding of other DNS query types was turned off because outbound \"%s\" became unavailable. Choose an outbound to re-enable it, or leave forwarding off."
-msgstr "Пересылка прочих DNS-запросов выключена: outbound «%s» недоступен. Выберите другой outbound или оставьте пересылку выключенной."
-
-msgid "DNS forwarding protection could not be saved or restored. Free storage and review Advanced DNS before trying again."
-msgstr "Не удалось сохранить или восстановить защитное отключение пересылки DNS. Освободите место и проверьте настройки в «Дополнительно → DNS» перед повторной попыткой."
-
 msgid "dnsmasq has its own upstream servers"
 msgstr "В dnsmasq настроены собственные вышестоящие серверы"
 
@@ -1697,3 +1643,9 @@ msgstr "Направляет распознанные звонки Discord че�
 
 msgid "Discord Voice inactive: enable conntrack accounting if needed (nf_conntrack_acct=1) and reload XrayWRT."
 msgstr "Голос Discord не активен: при необходимости включите учёт соединений (nf_conntrack_acct=1) и перезагрузите XrayWRT."
+
+msgid "Forward other DNS queries"
+msgstr "Пересылать другие DNS-запросы"
+
+msgid "Resolve TXT, SRV, MX and other queries using the configured DNS servers. FakeDNS can block queries for its domains."
+msgstr "Разрешать TXT, SRV, MX и другие запросы через настроенные DNS-серверы. FakeDNS может блокировать запросы для своих доменов."

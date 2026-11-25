@@ -118,10 +118,7 @@ config_install() {
 
 	# Same bytes: spare the flash and the restart.
 	if [ -f "$XRAY_CONFIG" ] && cmp -s "$candidate" "$XRAY_CONFIG"; then
-		# Reconcile DNS safety even for identical bytes; persistence failure must reject acceptance.
-		if [ -n "$(uci_get dns_raw_via)" ]; then
-			service_reload || return 1
-		elif [ -s "$APPLY_WARNING_FILE" ] || { [ -n "${SUBSCRIPTION_INSTALLING:-}" ] && [ -z "$(uci_get subscription)" ]; }; then
+		if [ -s "$APPLY_WARNING_FILE" ] || { [ -n "${SUBSCRIPTION_INSTALLING:-}" ] && [ -z "$(uci_get subscription)" ]; }; then
 			service_reload || warning="$(cat "$APPLY_WARNING_FILE" 2>/dev/null)"
 		fi
 		apply_result '{"action":"unchanged"}' "$warning"
@@ -151,16 +148,6 @@ config_install() {
 	fi
 	config_check_record ok
 	if cmp -s "$runtime_candidate" "$RUNTIME_CONFIG" && geodata_unchanged; then
-		if ! dns_forward_safety_save "$runtime_candidate.profile" "$runtime_candidate.dns-uci"; then
-			if [ -f "$old_config" ]; then
-				mv -f "$old_config" "$XRAY_CONFIG" || err "the previous config is saved in $old_config"
-			else
-				rm -f "$XRAY_CONFIG"
-			fi
-			rm -f "$runtime_candidate" "$runtime_candidate.profile" "$old_profile"
-			return 1
-		fi
-		rm -f "$runtime_candidate.dns-uci"
 		# Only the xraywrt key changed: the core keeps running.
 		if ! { mv -f "$runtime_candidate.profile" "$PROFILE_FILE" && touch "$PROFILE_FILE"; }; then
 			warning="$(apply_partial_message)"

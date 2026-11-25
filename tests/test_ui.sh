@@ -14,7 +14,6 @@ node "$ROOT_DIR/tests/js_api.js"
 node - "$ROOT_DIR" <<'NODE'
 const path = require('path');
 const h = require(path.join(process.argv[2], 'tests/js_luci_harness.js'));
-const dnsPlatform = require(path.join(process.argv[2], 'tests/fixtures/luci/dns-platform.js'));
 
 // E() stub: records nodes. A plain string child would be parsed as HTML by
 // LuCI, so the test fails on any non-array children.
@@ -285,6 +284,7 @@ seq(async () => {
   value(k, label) { this.keylist.push(k); this.vallist.push(label); }
   get values() { return this.keylist.map((k, i) => [k, this.vallist[i]]); }
   remove() {}
+  write(sid, value) { uci.set('xraywrt', sid, this.name, value); }
   load(sid) { return uci.get('xraywrt', sid, this.name); }
   cfgvalue() { return this.loaded; }
   isActive() { return this.active !== false; }
@@ -323,7 +323,7 @@ seq(async () => {
  // providerScalar lives in api.js and reads uci itself.
  const apiU = h.evaluateLuCIModule('rootfs/www/luci-static/resources/xraywrt/api.js', { E, ui, fs: {}, uci }).module;
  const sv = h.evaluateLuCIModule('rootfs/www/luci-static/resources/view/xraywrt/advanced.js', {
-  E, api: { ...apiU, jobNotice: () => E('div'), service: async (a) => { if (initFail) throw new Error('init'); initCalls.push(a); } }, view: { extend: v => v }, form, uci, widgets: { DeviceSelect: Option }, validation: dnsPlatform, rpc: { declare: (d) => async (...a) => { initCalls.push([d.method, ...a]); return {}; } }
+  E, api: { ...apiU, jobNotice: () => E('div'), service: async (a) => { if (initFail) throw new Error('init'); initCalls.push(a); } }, view: { extend: v => v }, form, uci, widgets: { DeviceSelect: Option }, rpc: { declare: (d) => async (...a) => { initCalls.push([d.method, ...a]); return {}; } }
  }).module;
  const renderSettings = async (profile, status = {}, sub = { url: 'https://p.example/sub' }, init = { xraywrt: { enabled: false } }) => {
   await sv.render([profile, status, sub, init]);
@@ -332,7 +332,7 @@ seq(async () => {
  const compactReads = [], compactProfile = { mode: 'direct-first', provider: {}, netbird: true, subscription: { configured: true, config_backup: true, auto_update: false } };
  const compactView = h.evaluateLuCIModule('rootfs/www/luci-static/resources/view/xraywrt/advanced.js', {
   E, api: { ...apiU, jobNotice: () => E('div'), read: async (...args) => { compactReads.push(args); return compactProfile; } },
-  view: { extend: v => v }, form, uci, widgets: { DeviceSelect: Option }, validation: dnsPlatform,
+  view: { extend: v => v }, form, uci, widgets: { DeviceSelect: Option },
   rpc: { declare: () => async () => ({ xraywrt: { enabled: true } }) }
  }).module;
  const compactPage = await compactView.render(await compactView.load());
@@ -345,7 +345,7 @@ seq(async () => {
  let opts = await renderSettings({ mode: 'direct-first', provider: { disable_quic: '0', mode: 'direct-first' } }, { netbird: true });
  // Spec 13 groups; every UCI option of the table that the UI edits sits in its group.
  const groups = { routing: ['source_network_interfaces', 'block_client_ipv6', 'discord_voice', 'disable_quic', 'bypass_ntp', 'netbird_proxy'],
-  dns: ['dns_hijack', '_dns_other', 'dns_raw_upstream', 'dns_raw_via', 'block_https_svcb'],
+  dns: ['dns_hijack', 'dns_forward_other_types', 'block_https_svcb'],
   core: ['core_log_level', 'bypass_subscription_dns', '_boot'] };
  h.assert(!(await renderSettings({ mode: 'direct-first' }, {}, {})).bypass_subscription_dns, 'no direct subscription download option without a saved link');
  h.assert(!opts.subscription_auto_update && !opts._subscription_url, 'no duplicate subscription settings');
@@ -372,7 +372,6 @@ seq(async () => {
  h.assert(!opts.dns_upstream, 'no DNS servers for Xray option: provider dns.servers or the WAN DNS');
  h.assert(opts.dns_hijack.description.includes('DoH/DoT'), 'DNS caveat is explicit');
  h.assert(opts.netbird_proxy.description.includes('through Xray in either traffic mode'), 'NetBird warns about both traffic modes');
- h.assert(!opts.dns_forward_other_types, 'the old flag is replaced by one select');
  h.assertEq(opts.block_https_svcb.default, '0', 'HTTPS/SVCB blocking defaults off');
  h.assert(opts.block_https_svcb.description.includes('empty HTTPS/SVCB answers'), 'whole-record warning');
  h.assertEq(opts.block_https_svcb.values.length, 0, 'HTTPS/SVCB without subscription flag is a checkbox');
@@ -411,204 +410,18 @@ seq(async () => {
  opts.block_https_svcb.write('settings', 'provider');
  h.assert(!overrides.includes('block_https_svcb'), 'HTTPS/SVCB can return to provider');
 
- // One select over dns_forward_other_types, dns_raw_via and dns_raw_upstream.
- let removedUpstream = 0;
- const optionRemove = Option.prototype.remove;
- Option.prototype.remove = () => { removedUpstream++; };
- const dnsOther = async (profile, own = {}, kept = []) => {
-  for (const k of Object.keys(ownSettings)) delete ownSettings[k];
-  Object.assign(ownSettings, own); overrides = kept;
-  return renderSettings({ dns_outbounds: ['proxy', 'VPN 🇷🇺 = primary', 'a b'], ...profile });
- };
- const viaValue = (option, tag) => option.values.find(([value, label]) => label === tag)?.[0];
- const flagKey = 'dns_forward_other_types';
- const dfProvider = (v) => ({ mode: 'direct-first', provider: { [flagKey]: v } });
- opts = await dnsOther({ mode: 'direct-first' });
- h.assertEq(opts._dns_other.title, 'Other DNS queries (TXT, SRV, MX…)', 'select title');
- h.assertEq(opts._dns_other.description, 'Xray handles A and AAAA. Choose where to send other queries. Direct forwarding uses plain DNS visible to your internet provider.', 'privacy warning wraps in description');
- h.assertEq(JSON.stringify(opts._dns_other.values), '[["off","Do not forward"],["direct","Forward directly"],["via","Forward through the VPN"]]', 'short direct-first choices');
-
-
- h.assertEq(opts._dns_other.default, 'off', 'not forwarded by default');
- h.assertEq(opts._dns_other.cfgvalue(), 'off', 'load: nothing set');
- opts = await dnsOther({ mode: 'direct-first' }, { [flagKey]: '1' });
- h.assertEq(opts._dns_other.cfgvalue(), 'direct', 'load: flag on in direct-first');
- opts = await dnsOther({ mode: 'direct-first' }, { [flagKey]: '1', dns_raw_via: 'proxy' });
- h.assertEq(opts._dns_other.cfgvalue(), 'via', 'load: a tag wins over the flag');
- opts = await dnsOther({ mode: 'proxy-first' }, { [flagKey]: '1' });
- h.assertEq(opts._dns_other.cfgvalue(), 'off', 'load: flag without effect in proxy-first');
- h.assertEq(opts._dns_other.values.map(v => v[0]).join(' '), 'off via', 'proxy-first does not offer direct forwarding');
- h.assertEq(ownSettings[flagKey], '1', 'loading does not rewrite UCI');
- opts = await dnsOther({ mode: 'proxy-first' }, { dns_raw_via: 'proxy' });
- h.assertEq(opts._dns_other.cfgvalue(), 'via', 'load: a tag in proxy-first');
- opts = await dnsOther(dfProvider('0'), { [flagKey]: '1' });
- h.assertEq(opts._dns_other.cfgvalue(), 'provider', 'load: configuration decides unless overridden');
- h.assertEq(JSON.stringify(opts._dns_other.values[0]), '["provider","From subscription: Do not forward"]', 'configuration choice, not forwarding');
- opts = await dnsOther(dfProvider('1'));
- h.assertEq(opts._dns_other.values[0][1], 'From subscription: Forward directly', 'configuration choice, forwarding');
- h.assertEq(JSON.stringify(opts.dns_raw_upstream.dependencies), '[["_dns_other","direct"],["_dns_other","via"],["_dns_other","provider"]]', 'server shown for direct, via and a forwarding configuration');
- opts = await dnsOther({ mode: 'proxy-first', provider: { [flagKey]: '1' } });
- h.assertEq(opts._dns_other.values[0][1], 'From subscription: Do not forward', 'configuration flag has no effect in proxy-first');
- opts = await dnsOther(dfProvider('0'), { [flagKey]: '1' }, [flagKey]);
- h.assertEq(opts._dns_other.cfgvalue(), 'direct', 'load: own forwarding over the configuration');
- opts = await dnsOther(dfProvider('1'), { [flagKey]: '0' }, [flagKey]);
- h.assertEq(opts._dns_other.cfgvalue(), 'off', 'load: own off over the configuration');
- opts = await dnsOther({ mode: 'direct-first' });
- h.assertEq(JSON.stringify(opts.dns_raw_upstream.dependencies), '[["_dns_other","direct"],["_dns_other","via"]]', 'server shown for direct and via');
- h.assertEq(opts.dns_raw_upstream.title, 'DNS server for these queries', 'server title');
-
- h.assertEq(JSON.stringify(opts.dns_raw_via.dependencies), '[["_dns_other","via"]]', 'tag shown only for via');
- h.assertEq(opts.dns_raw_via.title, 'Outbound tag', 'tag title');
- // Reproduce via -> provider/off -> switch inner tab: LuCI only validates active options.
- const checkDepends = mode => {
-  opts._dns_other.formvalue = () => mode;
-  for (const name of ['dns_raw_upstream', 'dns_raw_via']) {
-   const field = opts[name];
-   const active = field.dependencies.some(([key, value]) => value === mode);
-   if (field.isActive('settings') !== active) field.setActive('settings', active);
-   if (active) field.triggerValidation('settings');
-  }
- };
- opts.dns_raw_upstream.formvalue = () => '';
- opts.dns_raw_via.formvalue = () => '';
- checkDepends('via');
- h.assert(opts.dns_raw_via.error !== true, 'via requires explicit outbound, no auto-selection');
- h.assert(opts.dns_raw_upstream.error !== true, 'via requires explicit DNS IP');
- checkDepends('provider');
- h.assertEq(opts.dns_raw_via.error, true, 'inactive tag clears stale validation before inner-tab switch');
- h.assertEq(opts.dns_raw_upstream.error, true, 'inactive DNS clears stale validation before inner-tab switch');
- checkDepends('via');
- h.assert(opts.dns_raw_via.error !== true && opts.dns_raw_upstream.error !== true, 'return to via restores required checks');
- for (const mode of ['off', 'direct', 'provider']) {
-  checkDepends(mode);
-  h.assertEq(opts.dns_raw_via.validate('settings', 'missing'), true, mode + ': hidden invalid tag ignored');
- }
- checkDepends('via');
- h.assertEq(opts.dns_raw_via.vallist.slice(1).join('|'), 'proxy|VPN 🇷🇺 = primary|a b', 'dropdown preserves exact original outbound labels');
- for (const tag of ['proxy', 'VPN 🇷🇺 = primary', 'a b'])
-  h.assertEq(opts.dns_raw_via.validate('settings', viaValue(opts.dns_raw_via, tag)), true, 'source tag accepted: ' + tag);
- for (const tag of ['', 'pool', 'xraywrt-direct', 'missing'])
-  h.assert(opts.dns_raw_via.validate('settings', tag) !== true, 'unknown or empty tag rejected: ' + tag);
- for (const ip of ['192.0.2.53', '192.0.2.53:5353', '2001:db8::53', '[2001:db8::53]:5353', '::ffff:192.0.2.53', '[::ffff:192.0.2.53]:5353'])
-  h.assertEq(opts.dns_raw_upstream.validate('settings', ip), true, 'valid DNS IP: ' + ip);
- h.assert(dnsPlatform.parseIPv4('192.000.2.53') && dnsPlatform.parseIPv4('01.2.3.4'), 'real LuCI accepts noncanonical IPv4, unlike backend iptoarr');
- h.assert(dnsPlatform.parseIPv6('::ffff:192.000.2.53') && dnsPlatform.parseIPv6('::ffff:01.2.3.4'), 'real LuCI also accepts leading-zero IPv4 tails inside IPv6');
- for (const ip of ['', 'dns.example', '999.2.3.4', '192.0.2.53:0', '[::1]:65536', '192.0.2.0/24', '1:::2', '192.000.2.53', '01.2.3.4', '192.000.2.53:5353', '01.2.3.4:5353', '::ffff:192.000.2.53', '::ffff:01.2.3.4', '[::ffff:192.000.2.53]:5353', '[::ffff:01.2.3.4]:5353'])
-  h.assert(opts.dns_raw_upstream.validate('settings', ip) !== true, 'invalid active DNS IP: ' + ip);
- opts.dns_raw_upstream.formvalue = () => 'invalid';
- checkDepends('via'); checkDepends('off');
- h.assertEq(opts.dns_raw_upstream.error, true, 'hidden malformed IP clears stale validation too');
- checkDepends('direct');
- h.assertEq(opts.dns_raw_upstream.validate('settings', ''), true, 'direct keeps WAN fallback');
- const regularOpts = opts;
- // Exercise LuCI's real transformChoices()/Select constructor, not a safe object mock.
- const renderViaChoices = option => {
-  const choices = dnsPlatform.transformChoices.call(option);
-  const select = {};
-  dnsPlatform.selectInit.call(select, { isObject: value => value !== null && typeof value === 'object' }, option.cfgvalue('settings'), choices, { optional: true });
-  return select;
- };
- for (const tag of ['hasOwnProperty', '__proto__', 'constructor', 'outbound-0', 'missing', '<img src=x onerror=alert(1)> VPN']) {
-  opts = await dnsOther({ mode: 'direct-first', dns_outbounds: ['proxy', tag] });
-  const unselected = renderViaChoices(opts.dns_raw_via);
-  h.assertEq(opts._dns_other.cfgvalue(), 'off', 'special catalog tag renders while forwarding is off');
-  h.assertEq(unselected.values.length, 0, 'no saved tag means no automatic outbound selection');
-  h.assertEq(Object.values(unselected.choices).filter(label => label === tag).length, 1, 'hidden catalog preserves exact special tag');
-  opts = await dnsOther({ mode: 'direct-first', dns_outbounds: ['proxy', tag] }, { dns_raw_via: tag });
-  const select = renderViaChoices(opts.dns_raw_via);
-  const value = opts.dns_raw_via.cfgvalue('settings');
-  h.assertEq(select.choices[value], tag, 'real LuCI keeps exact choice label: ' + tag);
-  h.assertEq(Object.getPrototypeOf(select.choices), Object.prototype, 'source tag cannot change choice-object prototype');
-  h.assertEq(opts.dns_raw_via.validate('settings', value), true, 'saved special tag stays valid');
-  opts.dns_raw_via.formvalue = () => value;
-  opts._dns_other.write('settings', 'via');
-  h.assertEq(ownSettings.dns_raw_via, tag, 'selector writes exact original tag');
-  h.assertEq(typeof opts.dns_raw_via.write, 'function', 'outbound option maps widget values at UCI boundary');
-  opts.dns_raw_via.write('settings', value);
-  h.assertEq(ownSettings.dns_raw_via, tag, 'outbound option writes exact original tag');
-  uciReady = false;
-  opts = await dnsOther({ mode: 'direct-first', dns_outbounds: ['proxy'] }, { dns_raw_via: tag });
-  const missing = renderViaChoices(opts.dns_raw_via);
-  const missingValue = opts.dns_raw_via.cfgvalue('settings');
-  h.assert(missing.choices[missingValue].includes(tag), 'missing special tag remains visible after late UCI load');
-  h.assert(opts.dns_raw_via.validate('settings', missingValue) !== true, 'missing special tag stays invalid');
- }
- opts = regularOpts;
-
- uciReady = false;
- opts = await dnsOther({ mode: 'direct-first', dns_outbounds: ['proxy'] }, { dns_raw_via: 'gone' });
- h.assert(opts.dns_raw_via.keylist.includes(opts.dns_raw_via.cfgvalue('settings')), 'missing saved tag loads after view construction');
- h.assert(opts.dns_raw_via.vallist.some(label => label.includes('gone') && label.includes('not available')), 'missing saved tag remains visible');
- h.assert(opts.dns_raw_via.validate('settings', opts.dns_raw_via.cfgvalue('settings')) !== true, 'missing saved tag remains invalid');
- opts = await dnsOther({ mode: 'direct-first', dns_outbounds: [] });
- h.assert(opts.dns_raw_via.description.includes('No suitable outbounds'), 'no usable tags gives guidance');
- opts = regularOpts;
- // A backend safety latch is explicit off, not provider/default; only validated VPN repair releases it.
- const lostTag = 'hasOwnProperty |] <lost> 🇷🇺';
- opts = await dnsOther({ ...dfProvider('1'), dns_raw_lost: lostTag }, { dns_raw_via: lostTag, dns_raw_lost: lostTag, dns_raw_upstream: '192.0.2.53:0' });
- h.assertEq(opts._dns_other.cfgvalue(), 'off', 'lost outbound shows explicit off despite provider-direct default');
- h.assertEq(opts._dns_other.keylist.join(' '), 'off via', 'latched forwarding cannot switch to provider/direct fallback');
- h.assertEq(opts._dns_other.forcewrite, true, 'unrelated save retains safety override even when selection is unchanged');
- // Execute the real CBI.Value.renderFrame body: LuCI silently ignores a DOM-valued description.
- const platformFrame = require('vm').runInContext('(function ' + dnsPlatform.renderFrame.toString() + ')', h.createContext());
- const frameE = (tag, attrs, children) => {
-  const node = E(tag, attrs, typeof children === 'string' ? [children] : children);
-  Object.defineProperty(node, 'lastChild', { get: () => node.children.at(-1) });
-  return node;
- };
- const frameOption = Object.assign(Object.create(opts._dns_other), {
-  section: {}, map: { config: 'xraywrt', checkDepends() {} }, option: '_dns_other',
-  transformDepList: () => [], cbid: () => 'cbid.xraywrt.settings._dns_other', handleValueChange() {}
- });
- const rendered = platformFrame.call(frameOption, frameE,
-  { append: (node, child) => node.appendChild(child), bindClassInstance() {} },
-  { bind: (fn, self, ...args) => fn.bind(self, ...args) }, value => value,
-  'settings', false, 0, opts._dns_other.renderWidget('settings', 0, 'off'));
- const renderedWarning = collect(rendered).find(node => node.attrs.class === 'alert-message warning');
- h.assert(renderedWarning && texts(renderedWarning).some(line => line.includes(lostTag) && line.includes('Choose an outbound')), 'real LuCI option frame renders exact lost-tag warning as text');
- h.assert(collect(rendered).some(node => node.attrs.class === 'cbi-value-description' && texts(node).some(line => line.includes('Direct forwarding'))), 'real LuCI preserves normal DNS forwarding description while latched');
- opts._dns_other.write('settings', 'off');
- h.assertEq(ownSettings.dns_raw_lost, lostTag, 'unrelated save cannot acknowledge lost outbound warning');
- h.assertEq(ownSettings[flagKey], '0', 'unrelated save keeps explicit off');
- h.assert(overrides.includes(flagKey), 'safety latch overrides a later provider-direct flag');
- opts.dns_raw_via.formvalue = () => viaValue(opts.dns_raw_via, 'proxy');
- opts._dns_other.write('settings', 'via');
- h.assertEq(ownSettings.dns_raw_lost, '', 'explicit VPN repair clears safety warning');
- h.assertEq(ownSettings.dns_raw_via, 'proxy', 'explicit VPN repair uses the chosen exact tag');
- opts = regularOpts;
- // Hidden server keeps the user's value; an emptied visible one is removed.
- removedUpstream = 0;
- opts.dns_raw_upstream.isActive = () => false; opts.dns_raw_upstream.remove('settings');
- h.assertEq(removedUpstream, 0, 'hidden server is not removed');
- opts.dns_raw_upstream.isActive = () => true; opts.dns_raw_upstream.remove('settings');
- h.assertEq(removedUpstream, 1, 'emptied visible server is removed');
- Option.prototype.remove = optionRemove;
- // Save mapping without a provider flag: no override entries.
- opts.dns_raw_via.formvalue = () => viaValue(opts.dns_raw_via, 'proxy');
- overrides = ['bypass_ntp'];
- opts._dns_other.write('settings', 'direct');
- h.assertEq(ownSettings[flagKey] + '|' + ownSettings.dns_raw_via + '|' + overrides.join(','), '1||bypass_ntp', 'save direct');
- opts._dns_other.write('settings', 'via');
- h.assertEq(ownSettings[flagKey] + '|' + ownSettings.dns_raw_via + '|' + overrides.join(','), '0|proxy|bypass_ntp', 'save via');
- ownSettings.dns_raw_upstream = '192.0.2.53:0';
- opts._dns_other.write('settings', 'off');
- h.assertEq(ownSettings[flagKey] + '|' + ownSettings.dns_raw_via + '|' + overrides.join(','), '0||bypass_ntp', 'save off');
- h.assertEq(ownSettings.dns_raw_upstream, '192.0.2.53:0', 'off preserves inactive invalid saved server');
- // Save mapping with a provider flag: own values are recorded in provider_override.
- opts = await dnsOther(dfProvider('1'), {}, ['bypass_ntp']);
- opts.dns_raw_via.formvalue = () => viaValue(opts.dns_raw_via, 'proxy');
- opts._dns_other.write('settings', 'off');
- h.assertEq(ownSettings[flagKey] + '|' + ownSettings.dns_raw_via + '|' + overrides.join(','), '0||bypass_ntp,' + flagKey, 'save off over the configuration');
- opts._dns_other.write('settings', 'direct');
- h.assertEq(ownSettings[flagKey] + '|' + overrides.join(','), '1|bypass_ntp,' + flagKey, 'save direct over the configuration');
- opts._dns_other.write('settings', 'via');
- h.assertEq(ownSettings[flagKey] + '|' + ownSettings.dns_raw_via + '|' + overrides.join(','), '0|proxy|bypass_ntp,' + flagKey, 'save via over the configuration');
- opts._dns_other.write('settings', 'provider');
- h.assertEq(ownSettings.dns_raw_via + '|' + overrides.join(','), '|bypass_ntp', 'save configuration choice: override dropped, no tag');
- opts = await dnsOther(dfProvider('0'), { dns_raw_via: 'proxy', dns_raw_upstream: '192.0.2.53:0' });
- opts._dns_other.write('settings', 'provider');
- h.assertEq(ownSettings.dns_raw_via, '', 'provider-off clears saved outbound');
- h.assertEq(ownSettings.dns_raw_upstream, '192.0.2.53:0', 'provider-off preserves inactive invalid saved server');
+ opts = await renderSettings({ mode: 'proxy-first', provider: {} });
+ h.assertEq(opts.dns_forward_other_types.default, '1', 'forwarding defaults on');
+ opts.dns_forward_other_types.write('settings', '0');
+ h.assertEq(ownSettings.dns_forward_other_types, '0', 'forwarding off is saved');
+ h.assert(!overrides.includes('dns_forward_other_types'), 'ordinary save does not claim a provider override');
+ overrides = [];
+ opts = await renderSettings({ mode: 'direct-first', provider: { dns_forward_other_types: '0' } });
+ h.assertEq(opts.dns_forward_other_types.cfgvalue(), 'provider', 'forwarding follows provider');
+ opts.dns_forward_other_types.write('settings', '1');
+ h.assert(overrides.includes('dns_forward_other_types'), 'forwarding user override saved');
+ opts.dns_forward_other_types.write('settings', 'provider');
+ h.assert(!overrides.includes('dns_forward_other_types'), 'forwarding can return to provider');
  for (const k of Object.keys(ownSettings)) delete ownSettings[k];
  overrides = ['bypass_ntp'];
  opts = await renderSettings({ mode: 'direct-first', provider: { disable_quic: '0', mode: 'direct-first' } });

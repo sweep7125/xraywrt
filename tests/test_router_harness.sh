@@ -275,10 +275,10 @@ echo 'ok - smoke refuses an incomplete current-revision package pair (no VM)'
 
 # Router smoke must exercise the production core; Go is synthetic-node-only.
 if grep -q 'Installing Go Xray' "${ROUTER_DIR}/run-smoke.sh"; then fail 'smoke must not install Go as the router core'; fi
-grep -Fq 'xraywrt-core_0.26.5-r2_x86_64.apk' "${ROUTER_DIR}/run-smoke.sh" || fail 'smoke default must install the exact XrayWRT core VM artifact'
-echo 'ok - smoke defaults to XrayWRT core 0.26.5-r2 (no VM)'
+grep -Fq 'xraywrt-core_0.27.1-r1_x86_64.apk' "${ROUTER_DIR}/run-smoke.sh" || fail 'smoke default must install the exact XrayWRT core VM artifact'
+echo 'ok - smoke defaults to XrayWRT core 0.27.1-r1 (no VM)'
 
-# XRAY_TEST_CORE=installed keeps the guest's core (e.g. the xraywrt-core package) instead of Go Xray.
+# XRAY_TEST_CORE=installed keeps the guest's core.
 smoke_core="$(sed -n '/^if \[ "\${XRAY_TEST_CORE:-}" = installed \]; then$/,/^fi$/p' "${ROUTER_DIR}/run-smoke.sh")"
 [ -n "$smoke_core" ] || fail 'smoke core selection block missing'
 smoke_core_run() { # smoke_core_run <core-version-json reply>

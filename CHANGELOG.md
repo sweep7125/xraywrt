@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.10
+
+- Resolve additional DNS record types through the core's configured DNS. Forwarding and HTTPS/SVCB responses are enabled by default. Upgrades preserve a saved Off value. Provider DNS preferences and FakeDNS protections still apply.
+- For manual upgrades, install XrayWRT core 0.27.1-r1 or newer before updating the app.
+
 ## 0.1.9
 
 - Show the installed core package version after manual APK updates.

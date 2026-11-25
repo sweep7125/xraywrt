@@ -2,7 +2,6 @@
 'require view';
 'require form';
 'require ui';
-'require validation';
 'require rpc';
 'require xraywrt.configuration as configuration';
 'require uci';
@@ -64,106 +63,7 @@ return view.extend({
 
 		// DNS
 		flag('dns', 'dns_hijack', _('Hijack DNS'), _('Send plain DNS to the router. Encrypted DNS (DoH/DoT) stays untouched.'));
-		// One control over three UCI keys (dns_forward_other_types, dns_raw_via, dns_raw_upstream); only this select is shown for the flag.
-		// A non-empty dns_raw_via forwards in both modes; the flag only in direct-first.
-		const forwardKey = 'dns_forward_other_types';
-		const providerForward = (this.profile.provider || {})[forwardKey];
-		const providerForwardsDirectly = providerForward === '1' && !proxyFirst;
-		const lostTag = this.profile.dns_raw_lost || '';
-		const other = s.taboption('dns', form.ListValue, '_dns_other', _('Other DNS queries (TXT, SRV, MX…)'), _('Xray handles A and AAAA. Choose where to send other queries. Direct forwarding uses plain DNS visible to your internet provider.'));
-		if (lostTag) {
-			// LuCI descriptions accept strings only; render the text-only warning beside the widget.
-			const renderOther = other.renderWidget;
-			other.renderWidget = function() {
-				return E('div', {}, [ renderOther.apply(this, arguments), E('p', { class: 'alert-message warning' }, text(_('Forwarding of other DNS query types was turned off because outbound "%s" became unavailable. Choose an outbound to re-enable it, or leave forwarding off.').format(lostTag))) ]);
-			};
-		}
-		if (providerForward != null && !lostTag)
-			other.value('provider', _('From subscription: %s').format(providerForwardsDirectly ? _('Forward directly') : _('Do not forward')));
-		other.value('off', _('Do not forward'));
-		if (!proxyFirst && !lostTag)
-			other.value('direct', _('Forward directly'));
-		other.value('via', _('Forward through the VPN'));
-		other.default = 'off';
-		other.rmempty = false;
-		other.forcewrite = !!lostTag;
-		other.cfgvalue = () => {
-			if (lostTag) return 'off';
-			if (uci.get('xraywrt', 'settings', 'dns_raw_via'))
-				return 'via';
-			if (providerForward != null && ![].concat(uci.get('xraywrt', 'settings', 'provider_override') || []).includes(forwardKey))
-				return 'provider';
-			return uci.get('xraywrt', 'settings', forwardKey) === '1' && !proxyFirst ? 'direct' : 'off';
-		};
-		other.write = (sid, value) => {
-			if (lostTag) {
-				uci.set('xraywrt', sid, 'dns_raw_lost', value === 'via' ? '' : lostTag);
-				if (value !== 'via') value = 'off';
-			}
-			if (value === 'provider') {
-				api.setProviderOverride(sid, forwardKey, false);
-				uci.set('xraywrt', sid, 'dns_raw_via', '');
-				return;
-			}
-			uci.set('xraywrt', sid, forwardKey, value === 'direct' ? '1' : '0');
-			if (providerForward != null || lostTag)
-				api.setProviderOverride(sid, forwardKey, true);
-			uci.set('xraywrt', sid, 'dns_raw_via', value === 'via' ? tagFromValue(via.formvalue(sid)) : '');
-		};
-		// LuCI revalidates active dependencies only; clear errors when a field becomes hidden too.
-		const clearInactiveError = (option) => {
-			const setActive = option.setActive;
-			option.setActive = function(sid, active) {
-				const changed = setActive.apply(this, arguments);
-				if (!active) this.triggerValidation(sid);
-				return changed;
-			};
-		};
-		o = s.taboption('dns', form.Value, 'dns_raw_upstream', _('DNS server for these queries'), _('Use IP, IPv4:port or [IPv6]:port. Required via VPN. For direct forwarding, leave blank to use your connection’s DNS.'));
-		o.optional = true;
-		o.validate = function(sid, value) {
-			if (!this.isActive(sid)) return true;
-			if (!value) return other.formvalue(sid) !== 'via' || _('Enter a DNS server IP[:port] for forwarding through the VPN.');
-			const m = value.match(/^\[([^\]]+)\]:(\d+)$/) || value.match(/^([^:]+):(\d+)$/);
-			const ip = m ? m[1] : value;
-			// LuCI accepts leading-zero IPv4 octets (also in IPv6 tails); the backend's iptoarr does not.
-			const ipv4 = ip.includes('.') ? ip.split(':').pop() : '';
-			return (!!(validation.parseIPv4(ip) || validation.parseIPv6(ip)) && !/(^|\.)0\d/.test(ipv4) && (!m || +m[2] >= 1 && +m[2] <= 65535))
-				|| _('Enter a valid IP address with an optional port (1–65535).');
-		};
-		clearInactiveError(o);
-		o.depends('_dns_other', 'direct');
-		o.depends('_dns_other', 'via');
-		if (providerForwardsDirectly)
-			o.depends('_dns_other', 'provider');
-		// LuCI removes an option whose dependency is unmet: keep the server while forwarding is off.
-		const removeUpstream = o.remove;
-		o.remove = function(sid) { return this.isActive(sid) ? removeUpstream.apply(this, arguments) : null; };
-		const tags = this.profile.dns_outbounds || [];
-		// Raw tags can shadow methods on LuCI's choice objects; only widget values are encoded.
-		const tagFromValue = (value) => tags.find((tag, index) => value === 'outbound-' + index) || '';
-		const via = o = s.taboption('dns', form.ListValue, 'dns_raw_via', _('Outbound tag'), tags.length
-			? _('Choose an outbound from the original configuration. Chained outbounds keep their configured route.')
-			: _('No suitable outbounds. Add a tagged VPN outbound to the configuration.'));
-		o.value('', _('Choose an outbound'));
-		tags.forEach((tag, index) => o.value('outbound-' + index, tag));
-		// Map loads UCI after constructing these options, so inspect the saved tag during option load.
-		const loadVia = o.load;
-		o.load = function(sid) {
-			const savedTag = loadVia.call(this, sid);
-			if (!savedTag) return '';
-			const value = tags.includes(savedTag) ? 'outbound-' + tags.indexOf(savedTag) : 'missing';
-			if (!this.keylist.includes(value)) this.value(value, _('%s (not available)').format(savedTag));
-			return value;
-		};
-		o.default = '';
-		o.optional = true;
-		o.write = (sid, value) => uci.set('xraywrt', sid, 'dns_raw_via', tagFromValue(value));
-		o.depends('_dns_other', 'via');
-		o.validate = function(sid, value) {
-			return !this.isActive(sid) || !!tagFromValue(value) || _('Choose an available outbound from the configuration.');
-		};
-		clearInactiveError(o);
+		flag('dns', 'dns_forward_other_types', _('Forward other DNS queries'), _('Resolve TXT, SRV, MX and other queries using the configured DNS servers. FakeDNS can block queries for its domains.'), '1');
 		flag('dns', 'block_https_svcb', _('Block HTTPS/SVCB queries'), _('Return empty HTTPS/SVCB answers when forwarding other DNS queries. FakeDNS can still block forwarding for its domains.'), '0');
 
 		// Nothing is downloaded without a saved link.

@@ -86,7 +86,7 @@ for mode in proxy-first direct-first; do
  else
   jq -e '.dns.servers | all(.[]; type != "object" or .address == "fakedns")' <<<"$out" >/dev/null || fail 'proxy-first leaves DNS unchanged'
  fi
- XRAY_LOCATION_ASSET=/usr/local/share/xray-test xray-test run -test -c "$tmpdir/out.json" >"$tmpdir/direct-core.log" 2>&1 || fail "direct sites core test: $(cat "$tmpdir/direct-core.log")"
+ jq '(.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules[] | select(.action == "resolve") | .action) = "return"' "$tmpdir/out.json" >"$tmpdir/go-config.json"; XRAY_LOCATION_ASSET=/usr/local/share/xray-test xray-test run -test -c "$tmpdir/go-config.json" >"$tmpdir/direct-core.log" 2>&1 || fail "direct sites core test: $(cat "$tmpdir/direct-core.log")"
 done
 jq '.dns.servers = [{address:"192.0.2.54",port:5353,domains:["domain:provider.test"],queryStrategy:"UseIPv4",skipFallback:false}]' "$FX/src/sniff-tproxy.json" >"$tmpdir/direct-dns.json"
 gen "$tmpdir/direct-dns.json" '.mode_override = true | .mode = "direct-first" | '"$(rules_filter)"
@@ -296,7 +296,7 @@ for fake in false true; do
 	prof_has "$sniff_warn"
 	if [ "$fake" = false ]; then
 		jq -e '[.inbounds[] | select(.tag == "xraywrt-tproxy4" or .tag == "xraywrt-tproxy6") | has("sniffing") | not] | all' <<<"$out" >/dev/null || fail 'no provider sniffing: no runtime key'
-		XRAY_LOCATION_ASSET=/usr/local/share/xray-test xray-test run -test -c "$tmpdir/out.json" >"$tmpdir/sniff-core.log" 2>&1 ||
+		jq '(.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules[] | select(.action == "resolve") | .action) = "return"' "$tmpdir/out.json" >"$tmpdir/go-config.json"; XRAY_LOCATION_ASSET=/usr/local/share/xray-test xray-test run -test -c "$tmpdir/go-config.json" >"$tmpdir/sniff-core.log" 2>&1 ||
 			fail "no sniffing/no fake-IP core test: $(cat "$tmpdir/sniff-core.log")"
 	else
 		jq -e '[.inbounds[] | select(.tag == "xraywrt-tproxy4" or .tag == "xraywrt-tproxy6") | .sniffing == {enabled:true,destOverride:["fakedns"],routeOnly:true}] | all' <<<"$out" >/dev/null || fail 'fake-IP synthesizes only fakedns sniffing'
@@ -373,7 +373,7 @@ xr '{"lists-interval": 12, "frac": 1.5}'
 assert_eq 'set lists_interval 12
 ignored frac' "$actual" 'integer next to a decimal'
 gen "$FX/src/single.json" '.extra = 1.5'
-assert_eq '[{"qType":"1,28","action":"hijack"},{"action":"return"}]' "$(jq -c '.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules' <<<"$out")" 'integer params stay integers next to a decimal'
+assert_eq '[{"action":"resolve"}]' "$(jq -c '.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules' <<<"$out")" 'integer params stay integers next to a decimal'
 jq --argjson x '{"mode": "direct-first"}' '.[1].xraywrt = $x' "$FX/src/remnawave-array.json" >"$tmpdir/src.json"
 gen "$tmpdir/src.json" '.profile = "DE Frankfurt"'
 prof_has 'set mode direct-first'
@@ -428,9 +428,6 @@ assert_eq "$(fr '[]')" "$(fin xraywrt-direct)" 'router direct finalRules'
 assert_eq "$(fr '[]')" "$(fin direct)" 'provider freedom finalRules'
 assert_eq "$(fr '[]' | jq -c '. + [{action: "block", port: "25"}]')" "$(fin own)" 'provider finalRules follow the router rules'
 assert_eq null "$(fin via)" 'dialerProxy freedom: no finalRules'
-gen "$tmpdir/src.json" ".local_nets = $nets | .dns_raw_upstream = \"[2001:db8::53]:5353\""
-assert_eq 0 "$rc" "dns_raw_upstream: $errtxt"
-assert_eq "$(fr '[{"action": "allow", "ip": ["2001:db8::53"]}]')" "$(fin xraywrt-direct)" 'dns_raw_upstream IP allowed'
 gen_fails "$FX/src/single.json" 'config: local_nets is empty' '.local_nets = []'
 jq '.outbounds[1].settings = {finalRules: "x"}' "$FX/src/single.json" >"$tmpdir/src.json"
 gen_fails "$tmpdir/src.json" 'config: outbound "direct" finalRules is not an array'
@@ -589,7 +586,8 @@ prof_has 'geodata own.dat https://own.example/a.dat?x=y'
 xray_test_bin "user geodata" || exit 0
 cp /usr/local/share/xray-test/*.dat "$tmpdir/"
 cp "$tmpdir/geoip.dat" "$tmpdir/own.dat"
-XRAY_LOCATION_ASSET="$tmpdir" "$XRAY_TEST_BIN" run -test -c "$tmpdir/out.json" >"$tmpdir/core-test.log" 2>&1 || fail "user geodata core test: $(cat "$tmpdir/core-test.log")"
+jq '(.outbounds[] | select(.tag == "xraywrt-dns") | .settings.rules[] | select(.action == "resolve") | .action) = "return"' "$tmpdir/out.json" >"$tmpdir/go-config.json"
+XRAY_LOCATION_ASSET="$tmpdir" "$XRAY_TEST_BIN" run -test -c "$tmpdir/go-config.json" >"$tmpdir/core-test.log" 2>&1 || fail "user geodata core test: $(cat "$tmpdir/core-test.log")"
 gen "$FX/src/full.json" '.geodata_asset = ["own.dat=https://own.example/a.dat", "geosite.dat=https://own.example/site.dat"] | .geodata_cron = "15 6 * * 1-5"'
 assert_eq 0 "$rc" "merged geodata: $errtxt"
 assert_eq "$(jq -r '.geodata.cron' "$FX/src/full.json")" "$(jq -r '.geodata.cron' <<<"$out")" 'subscription cron wins'

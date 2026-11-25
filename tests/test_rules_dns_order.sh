@@ -18,7 +18,7 @@ command -v node >/dev/null || fail 'node missing from the test image'
 # DNS is the fake upstream of the probe on 127.0.0.1:53.
 gen_rules() {
 	printf '%s\n' "$2" >"$tmpdir/rules.txt"
-	gen "$FX/src/single.json" ".mode_override = true | .mode = \"$1\" | .wan_dns = [\"127.0.0.1\"] | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {}"
+	gen "$FX/src/single.json" ".mode_override = true | .mode = \"$1\" | .wan_dns = [\"127.0.0.1\"] | .rules_file = \"$tmpdir/rules.txt\" | .rules_remote = {} | .dns_forward_other_types = 0 | .api_listen = \"$tmpdir/api.sock,0600\""
 	assert_eq 0 "$rc" "generate: $errtxt"
 	jq '.inbounds |= map(select(.tag == "xraywrt-dns-in"))' <<<"$out" >"$tmpdir/runtime.json"
 }

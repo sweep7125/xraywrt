@@ -861,10 +861,8 @@ pass 'hotplug'
  printf 'nameserver 10.0.0.2\n' >"$DNS_AUTO_RESOLVFILE"
  refresh_cli
  assert_eq 2 "$(wc -l <"$tmpdir/refresh/runtime.calls" | tr -d ' ')" 'WAN DNS change regenerates the config'
- DNS_RAW_UPSTREAM=192.0.2.9
  printf 'nameserver 10.0.0.3\n' >"$DNS_AUTO_RESOLVFILE"
  printf 'profile-schema 1\nfake-enabled 0\ndns-upstream\n' >"$PROFILE_FILE"
- settings_load() { refresh_settings_load; DNS_RAW_UPSTREAM=192.0.2.9; }
  refresh_cli
  assert_eq 2 "$(wc -l <"$tmpdir/refresh/runtime.calls" | tr -d ' ')" 'config without WAN DNS is not regenerated'
 )

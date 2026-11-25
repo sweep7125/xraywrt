@@ -259,8 +259,6 @@ test('transport mapping never rewrites backend output or generic error text', as
 const BACKEND_ERRORS = [
 	["config: share links are not supported, use the Xray JSON subscription URL [E:config_share]", "This link returns vless://, vmess://… links. Ask the service for an Xray JSON subscription link."],
 	["config: Clash/Mihomo YAML is not supported [E:config_yaml]", "This is Clash/Mihomo (YAML). Ask the service for an Xray JSON subscription link."],
-	["config: missing DNS IP [E:dns_raw_upstream_required]", "Enter a DNS server IP[:port] for forwarding through the VPN."],
- ["config: invalid DNS IP [E:dns_raw_upstream_invalid]", "Enter a valid IP address with an optional port (1–65535)."],
  ["config: not JSON [E:config_json]", "The configuration is not valid JSON."],
 	["config: no outbounds [E:config_outbounds]", "The configuration has no outbounds."],
 	["config: routing is not an object [E:config_invalid|routing is not an object]", "The configuration is invalid: routing is not an object"],
